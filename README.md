@@ -33,3 +33,7 @@ python main.py --exp_name=paigcnn_1024_eval --model=paigcnn --num_points=1024 --
 ``` 2048 points
 python main.py --exp_name=paigcnn_2048_eval --model=paigcnn --num_points=2048 --k=40 --use_sgd=True --eval=True --model_path=pretrained/model.2048.t7
 ```
+
+#### Acknowlegements:
+
+The structure of this codebase is borrowed from [DGCNN](https://github.com/WangYueFt/dgcnn).
