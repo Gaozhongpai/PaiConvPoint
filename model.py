@@ -138,9 +138,9 @@ class Transform_Net(nn.Module):
         x = self.compute_rotation_matrix_from_ortho6d(x)
         return x
 
-class TransformIndex(nn.Module):
+class PaiIndexMatrix(nn.Module):
     def __init__(self, args, kernel_size):
-        super(TransformIndex, self).__init__()
+        super(PaiIndexMatrix, self).__init__()
         self.k = args.k
         self.kernel_size = kernel_size
         self.kernals = nn.Parameter(torch.rand(3, self.kernel_size-1) - 0.5, requires_grad=True)
@@ -224,7 +224,7 @@ class PaiNet(nn.Module):
         self.args = args
         self.k = args.k
         num_kernel = 32
-        self.transform = TransformIndex(args, kernel_size=num_kernel)
+        self.transform = PaiIndexMatrix(args, kernel_size=num_kernel)
         self.bn5 = nn.BatchNorm1d(args.emb_dims)
         self.activation = nn.LeakyReLU(negative_slope=0.2)
 
