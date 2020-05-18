@@ -17,7 +17,7 @@ import torch.nn.functional as F
 import torch.optim as optim
 from torch.optim.lr_scheduler import CosineAnnealingLR
 from data import ModelNet40
-from model import PointNet, DGCNN, PaiDGCNN
+from model import PointNet, DGCNN, PaiNet
 import numpy as np
 from torch.utils.data import DataLoader
 from util import cal_loss, IOStream
@@ -51,7 +51,7 @@ def train(args, io):
     elif args.model == 'dgcnn':
         model = DGCNN(args).to(device)
     else:
-        model = PaiDGCNN(args).to(device)
+        model = PaiNet(args).to(device)
         #raise Exception("Not implemented")
     print(str(model))
 
@@ -168,7 +168,7 @@ def test(args, io):
     elif args.model == 'dgcnn':
         model = DGCNN(args).to(device)
     else:
-        model = PaiDGCNN(args).to(device)
+        model = PaiNet(args).to(device)
         #raise Exception("Not implemented")
     print(str(model))
     # model = DGCNN(args).to(device)
