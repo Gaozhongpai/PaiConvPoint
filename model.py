@@ -189,9 +189,9 @@ class PaiIndexMatrix(nn.Module):
         adjweight = torch.where(adjweight > 0.1, adjweight, torch.full_like(adjweight, 0.)) 
         return spirals_index, adjweight
 
-class SpiralConvIndex(nn.Module):
+class PaiConv(nn.Module):
     def __init__(self, in_c, out_c, k, kernel_size=20, bias=True): # ,device=None):
-        super(SpiralConvIndex,self).__init__()
+        super(PaiConv, self).__init__()
         self.k = k
         self.kernel_size = kernel_size
         self.in_c = in_c
@@ -224,14 +224,14 @@ class PaiNet(nn.Module):
         self.args = args
         self.k = args.k
         num_kernel = 32
-        self.transform = PaiIndexMatrix(args, kernel_size=num_kernel)
+        self.paiIdxMatrix = PaiIndexMatrix(args, kernel_size=num_kernel)
         self.bn5 = nn.BatchNorm1d(args.emb_dims)
         self.activation = nn.LeakyReLU(negative_slope=0.2)
 
-        self.conv1 = SpiralConvIndex(3, 64, self.k, num_kernel)
-        self.conv2 = SpiralConvIndex(64, 64, self.k, num_kernel)
-        self.conv3 = SpiralConvIndex(64, 128, self.k, num_kernel)
-        self.conv4 = SpiralConvIndex(128, 256, self.k, num_kernel)
+        self.conv1 = PaiConv(3, 64, self.k, num_kernel)
+        self.conv2 = PaiConv(64, 64, self.k, num_kernel)
+        self.conv3 = PaiConv(64, 128, self.k, num_kernel)
+        self.conv4 = PaiConv(128, 256, self.k, num_kernel)
         self.conv5 = nn.Sequential(nn.Conv1d(512, args.emb_dims, kernel_size=1, bias=False),
                                    self.bn5)
         self.linear1 = nn.Linear(args.emb_dims*2, 512, bias=False)
@@ -252,7 +252,7 @@ class PaiNet(nn.Module):
         # x = torch.bmm(x, t)                     # (batch_size, num_points, 3) * (batch_size, 3, 3) -> (batch_size, num_points, 3)
         # x = x.transpose(2, 1) 
 
-        spirals_index, adjweight = self.transform(x) 
+        spirals_index, adjweight = self.paiIdxMatrix(x) 
         x = F.gelu(self.conv1(x, spirals_index, adjweight))
         x1 = x.clone()
 
