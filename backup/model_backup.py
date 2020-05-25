@@ -30,6 +30,15 @@ def knn2(K=20):
     )
     return knn
 
+def knn3(K=20, D=3):
+    knn = generic_argkmin(
+        'SqDist(x, y)',
+        'a = Vi({})'.format(K),
+        'x = Vi({})'.format(D),
+        'y = Vj({})'.format(D),
+    )
+    return knn
+
 def knn(x, k):
     inner = -2*torch.matmul(x.transpose(2, 1), x)
     xx = torch.sum(x**2, dim=1, keepdim=True)

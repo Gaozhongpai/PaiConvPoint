@@ -17,7 +17,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import torch.nn.init as init
-# from sparsemax import Sparsemax
+from sparsemax import Sparsemax
 # from sinkhorn import Sinkhorn
 from pykeops.torch import generic_argkmin
 
@@ -43,11 +43,11 @@ def fibonacci_sphere(samples=1,randomize=False):
     if randomize:
         rnd = random.random() * samples
 
-    points = []
+    points = [[0, 0, 0]]
     offset = 2./samples
     increment = math.pi * (3. - math.sqrt(5.))
 
-    for i in range(samples):
+    for i in range(samples-1):
         y = ((i * offset) - 1) + (offset / 2)
         r = math.sqrt(1 - pow(y,2))
 
@@ -138,56 +138,97 @@ class Transform_Net(nn.Module):
         x = self.compute_rotation_matrix_from_ortho6d(x)
         return x
 
+class RandLANet(nn.Module):
+    def __init__(self, in_c, out_c, k, kernel_size=20, bias=True): # ,device=None):
+        super(RandLANet, self).__init__()
+        self.k = k
+        self.kernel_size = kernel_size
+        self.in_c = in_c
+        self.out_c = out_c
+        self.mlp = nn.Conv1d(in_c, in_c, kernel_size=1, bias=False)
+        self.conv = nn.Linear(in_c,out_c,bias=bias)
+        self.bn = nn.BatchNorm1d(out_c)
+        self.softmax = nn.Softmax(dim=1)
+
+    def forward(self, feature, spirals_index, adjweight):
+        bsize, feats, num_pts = feature.size()
+        feature = feature.permute(0, 2, 1).contiguous().view(bsize*num_pts, feats)
+        
+        spirals = feature[spirals_index,:].view(bsize*num_pts, self.k, feats)
+        spirals = spirals.permute(0, 2, 1).contiguous()
+        
+        spirals = torch.sum(self.softmax(self.mlp(spirals))*spirals, dim=-1) ## This is for RandLA-Net
+        spirals = spirals.view(bsize*num_pts, feats)
+
+        out_feat = self.conv(spirals).view(bsize,num_pts,self.out_c)  
+        out_feat = self.bn(out_feat.permute(0, 2, 1).contiguous())      
+        return out_feat
+    
+    
 class PaiIndexMatrix(nn.Module):
     def __init__(self, args, kernel_size):
         super(PaiIndexMatrix, self).__init__()
         self.k = args.k
         self.kernel_size = kernel_size
-        self.kernals = nn.Parameter(torch.rand(3, self.kernel_size-1) - 0.5, requires_grad=True)
-        self.kernals.data = torch.tensor(fibonacci_sphere(self.kernel_size-1)).transpose(0, 1)
-        self.kernals_padding = nn.Parameter(torch.zeros(3, 1), requires_grad=False)
+        self.kernals = nn.Parameter(torch.rand(3, self.kernel_size) - 0.5, requires_grad=False)
+        #self.kernals = nn.Parameter(torch.tensor(fibonacci_sphere(self.kernel_size)).transpose(0, 1), requires_grad=False)
         # self.softmax = Sparsemax(dim=-1)  # Sparsemax(dim=-1) #nn.Softmax(dim=1)
         # self.A = nn.Parameter(torch.randn(3, 3))
         self.one_padding = nn.Parameter(torch.zeros(self.k, self.kernel_size), requires_grad=False)
         self.one_padding.data[0, 0] = 1
-        self.conv = nn.Conv1d(self.k, self.k, kernel_size=1, bias=False)
+        
+        # self.mlp = nn.Conv1d(10, 16, kernel_size=1, bias=False)
+        # self.mlp_out = nn.Conv1d(3, 16, kernel_size=1, bias=False)
+        # self.conv = nn.Linear(16*self.kernel_size,16,bias=True)
+        # self.bn = nn.BatchNorm1d(16)
         # self.reset_parameters()
 
-    def reset_parameters(self):
-        stdv = 1. / math.sqrt(9)
-        self.A.data.uniform_(-stdv, stdv)
-        self.A.data += torch.eye(3)*2
+    # def reset_parameters(self):
+    #     stdv = 1. / math.sqrt(9)
+    #     self.A.data.uniform_(-stdv, stdv)
+    #     self.A.data += torch.eye(3)*2
+    def TopMax(self, adjweight):
+        # adjweight = (adjweight - torch.min(adjweight, dim=1, keepdim=True)[0]) / \
+        #             (torch.max(adjweight, dim=1, keepdim=True)[0] - torch.min(adjweight, dim=1, keepdim=True)[0])  
+        adjweight = torch.where(adjweight > 0, adjweight, torch.full_like(adjweight, 0.))  # adjweight[adjweight < 0] = torch.min(adjweight)*5
+        adjweight = adjweight / (torch.sum(adjweight, dim=1, keepdim=True) + 1e-6)
+        adjweight = adjweight * adjweight
+        adjweight = adjweight / (torch.sum(adjweight, dim=1, keepdim=True) + 1e-6)
+        adjweight = torch.where(adjweight > 0.1, adjweight, torch.full_like(adjweight, 0.)) 
+        return adjweight
 
     def forward(self, x):
-        batch_size, feats, num_pts = x.size()
+        bsize, feats, num_pts = x.size()
         spirals_index = knn(x, self.k)
-        idx_base = torch.arange(0, batch_size, device=x.device).view(-1, 1, 1)*num_pts
+        idx_base = torch.arange(0, bsize, device=x.device).view(-1, 1, 1)*num_pts
         spirals_index = (spirals_index + idx_base).view(-1) # bsize*num_pts*spiral_size
-        spirals = x.permute(0, 2, 1).contiguous().view(batch_size*num_pts, feats)
-        spirals = spirals[spirals_index,:].view(batch_size*num_pts, self.k, feats)
-        kernals = torch.cat([self.kernals_padding, self.kernals], dim=1)
+        spirals = x.permute(0, 2, 1).contiguous().view(bsize*num_pts, feats)
+        spirals = spirals[spirals_index,:].view(bsize*num_pts, self.k, feats)
+        
+        # #### relative position ####
+        # x_repeat = spirals[:, 0:1, :].expand_as(spirals)
+        # x_relative = spirals - x_repeat
+        # x_dis = torch.norm(x_relative, dim=-1, keepdim=True)
+        # x_feats = torch.cat([spirals, x_repeat, x_relative, x_dis], dim=-1)
+        
         #adjweight = torch.matmul(torch.matmul(spirals - spirals[:, 0:1, :], 
         #            (self.A + self.A.transpose(0, 1)) / 2), kernals)
         #### different distance ########
         # adjweight = - torch.norm((spirals - spirals[:, 0:1, :])[:, :, None, :] - 
         #             kernals.transpose(0, 1)[None, None, :, :], dim=3)
-        # adjweight = (adjweight - torch.min(adjweight, dim=1, keepdim=True)[0]) / \
-        #             (torch.max(adjweight, dim=1, keepdim=True)[0] - torch.min(adjweight, dim=1, keepdim=True)[0])  
-        # adjweight = adjweight * adjweight 
-        # adjweight = torch.where(adjweight > 0.1, adjweight, torch.full_like(adjweight, 0.))
-        # adjweight = adjweight * adjweight              
-        # adjweight = torch.where(adjweight > 0.1, adjweight, torch.full_like(adjweight, 0.))
-        # adjweight = adjweight / (torch.sum(adjweight, dim=1, keepdim=True) + 1e-6)
         ################################
-        adjweight = torch.matmul(spirals - spirals[:, 0:1, :], kernals)
+        adjweight = torch.matmul(spirals - spirals[:, 0:1, :], self.kernals)
         adjweight = (adjweight + self.one_padding) #
-        adjweight = torch.where(adjweight > 0, adjweight, torch.full_like(adjweight, 0.))  # adjweight[adjweight < 0] = torch.min(adjweight)*5
+        adjweight = self.TopMax(adjweight)
         # adjweight = self.softmax(adjweight.permute(0, 2, 1).contiguous()).permute(0, 2, 1).contiguous()
-        adjweight = adjweight / (torch.sum(adjweight, dim=1, keepdim=True) + 1e-6)
-        adjweight = adjweight * adjweight
-        adjweight = adjweight / (torch.sum(adjweight, dim=1, keepdim=True) + 1e-6)
-        adjweight = torch.where(adjweight > 0.1, adjweight, torch.full_like(adjweight, 0.)) 
-        return spirals_index, adjweight
+        
+        ##### first feature #####
+        # spirals = self.mlp(x_feats.permute(0, 2, 1).contiguous())
+        # spirals = torch.matmul(spirals, adjweight)
+        # spirals = spirals.view(bsize*num_pts, 16*self.kernel_size)
+        # out_feat = self.conv(spirals).view(bsize,num_pts,16)  
+        # out_feat = self.bn(out_feat.permute(0, 2, 1).contiguous() + self.mlp_out(x))  
+        return spirals_index, adjweight #, F.gelu(out_feat)
 
 class PaiConv(nn.Module):
     def __init__(self, in_c, out_c, k, kernel_size=20, bias=True): # ,device=None):
@@ -196,19 +237,19 @@ class PaiConv(nn.Module):
         self.kernel_size = kernel_size
         self.in_c = in_c
         self.out_c = out_c
-        # self.conv1 = nn.Conv1d(in_c*2, in_c, kernel_size=1, bias=False)
+        # self.mlp = nn.Conv1d(7, in_c, kernel_size=1, bias=False)
         self.conv = nn.Linear(in_c*self.kernel_size,out_c,bias=bias)
         self.bn = nn.BatchNorm1d(out_c)
 
-    def forward(self, x, spirals_index, adjweight):
-        bsize, feats, num_pts = x.size()
-        x = x.permute(0, 2, 1).contiguous().view(bsize*num_pts, feats)
-        spirals = x[spirals_index,:].view(bsize*num_pts, self.k, feats)
+    def forward(self, feature, spirals_index, adjweight):
+        bsize, feats, num_pts = feature.size()
+        feature = feature.permute(0, 2, 1).contiguous().view(bsize*num_pts, feats)
         
-        # x = spirals[:, 0:1, :].repeat(1, self.k, 1)
-        # spirals = torch.cat([spirals - x, x], dim=2)
-        # spirals = self.conv1(spirals.permute(0, 2, 1).contiguous())
+        spirals = feature[spirals_index,:].view(bsize*num_pts, self.k, feats)
         spirals = spirals.permute(0, 2, 1).contiguous()
+        
+        # x_feat = self.mlp(x_feat.permute(0, 2, 1).contiguous())
+        # spirals = torch.cat([x_feat, spirals], dim=1)
         
         spirals = torch.matmul(spirals, adjweight)
         spirals = spirals.view(bsize*num_pts, feats*self.kernel_size)
@@ -223,7 +264,7 @@ class PaiNet(nn.Module):
         super(PaiNet, self).__init__()
         self.args = args
         self.k = args.k
-        num_kernel = 32
+        num_kernel = 20
         self.paiIdxMatrix = PaiIndexMatrix(args, kernel_size=num_kernel)
         self.bn5 = nn.BatchNorm1d(args.emb_dims)
         self.activation = nn.LeakyReLU(negative_slope=0.2)
@@ -244,7 +285,7 @@ class PaiNet(nn.Module):
         # self.transform_net = Transform_Net(args)
 
     def forward(self, x):
-        batch_size = x.size(0)
+        batch_size, feats, num_pts = x.size()
 
         # x0 = get_graph_feature(x, k=self.k)     # (batch_size, 3, num_points) -> (batch_size, 3*2, num_points, k)
         # t = self.transform_net(x0)              # (batch_size, 3, 3)
@@ -253,17 +294,18 @@ class PaiNet(nn.Module):
         # x = x.transpose(2, 1) 
 
         spirals_index, adjweight = self.paiIdxMatrix(x) 
-        x = F.gelu(self.conv1(x, spirals_index, adjweight))
-        x1 = x.clone()
-
-        x = F.gelu(self.conv2(x, spirals_index, adjweight))
-        x2 = x.clone()
         
-        x = F.gelu(self.conv3(x, spirals_index, adjweight))
-        x3 = x.clone()
+        feature = F.gelu(self.conv1(x, spirals_index, adjweight))
+        x1 = feature.clone()
 
-        x = F.gelu(self.conv4(x, spirals_index, adjweight))
-        x4 = x.clone()
+        feature = F.gelu(self.conv2(feature, spirals_index, adjweight))
+        x2 = feature.clone()
+        
+        feature = F.gelu(self.conv3(feature, spirals_index, adjweight))
+        x3 = feature.clone()
+
+        feature = F.gelu(self.conv4(feature, spirals_index, adjweight))
+        x4 = feature.clone()
 
         x = torch.cat((x1, x2, x3, x4), dim=1)
         x = F.gelu(self.conv5(x))

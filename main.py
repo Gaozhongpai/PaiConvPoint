@@ -57,10 +57,10 @@ def train(args, io):
 
     model = nn.DataParallel(model)
     print("Let's use", torch.cuda.device_count(), "GPUs!")
-    if os.path.exists('checkpoints/%s/models/model_%s.t7'% (args.exp_name, args.model)):
-        checkpoint_dict = torch.load('./checkpoints/%s/models/model_%s.t7'% (args.exp_name, args.model), map_location=device)
-        model.load_state_dict(checkpoint_dict, strict=True)
-        print("Load model from './checkpoints/%s/models/model_%s.t7 !'"% (args.exp_name, args.model))
+    # if os.path.exists('checkpoints/%s/models/model_%s.t7'% (args.exp_name, args.model)):
+    #     checkpoint_dict = torch.load('./checkpoints/%s/models/model_%s.t7'% (args.exp_name, args.model), map_location=device)
+    #     model.load_state_dict(checkpoint_dict, strict=True)
+    #     print("Load model from './checkpoints/%s/models/model_%s.t7 !'"% (args.exp_name, args.model))
 
     if args.use_sgd:
         print("Use SGD")
@@ -173,10 +173,17 @@ def test(args, io):
     print(str(model))
     # model = DGCNN(args).to(device)
     model = nn.DataParallel(model)
-    if os.path.exists('checkpoints/%s/models/model_%s.t7'% (args.exp_name, args.model)):
-        checkpoint_dict = torch.load('./checkpoints/%s/models/model_%s.t7'% (args.exp_name, args.model), map_location=device)
+    if os.path.exists('checkpoints/%s/models/model_%s_2048.t7'% (args.exp_name, args.model)):
+        checkpoint_dict = torch.load('./checkpoints/%s/models/model_%s_2048.t7'% (args.exp_name, args.model), map_location=device)
+        # pretrained_dict = {}
+        # for k, v in checkpoint_dict.items():
+        #     if 'transform' in k:
+        #         k = k.replace('transform', 'paiIdxMatrix')
+        #     pretrained_dict[k]=v           
+        # # pretrained_dict = {k: v for k, v in pretrained_dict.items() if 'transform' in k}
         model.load_state_dict(checkpoint_dict, strict=True)
-        print("Load model from './checkpoints/%s/models/model_%s.t7 !'"% (args.exp_name, args.model))
+        # torch.save(model.state_dict(), 'checkpoints/%s/models/model_%s_2048.t7' % (args.exp_name, args.model))
+        print("Load model from './checkpoints/%s/models/model_%s_2048.t7 !'"% (args.exp_name, args.model))
     model = model.eval()
     test_acc = 0.0
     count = 0.0
@@ -209,9 +216,9 @@ if __name__ == "__main__":
                         help='Model to use, [pointnet, dgcnn]')
     parser.add_argument('--dataset', type=str, default='modelnet40', metavar='N',
                         choices=['modelnet40'])
-    parser.add_argument('--batch_size', type=int, default=16, metavar='batch_size',
+    parser.add_argument('--batch_size', type=int, default=32, metavar='batch_size',
                         help='Size of batch)')
-    parser.add_argument('--test_batch_size', type=int, default=8, metavar='batch_size',
+    parser.add_argument('--test_batch_size', type=int, default=16, metavar='batch_size',
                         help='Size of batch)')
     parser.add_argument('--epochs', type=int, default=250, metavar='N',
                         help='number of episode to train ')
@@ -225,7 +232,7 @@ if __name__ == "__main__":
                         help='enables CUDA training')
     parser.add_argument('--seed', type=int, default=1, metavar='S',
                         help='random seed (default: 1)')
-    parser.add_argument('--eval', type=bool,  default=True,
+    parser.add_argument('--eval', type=bool,  default=False,
                         help='evaluate the model')
     parser.add_argument('--num_points', type=int, default=2048,
                         help='num of points to use')
