@@ -14,7 +14,8 @@ import glob
 import h5py
 import numpy as np
 from torch.utils.data import Dataset
-
+import open3d as o3d
+import time
 
 def download():
     BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -68,12 +69,16 @@ class ModelNet40(Dataset):
         self.partition = partition        
 
     def __getitem__(self, item):
-        pointcloud = self.data[item][:self.num_points]
+        
         label = self.label[item]
         if self.partition == 'train':
+            pointcloud = self.data[item][np.random.permutation(self.data.shape[1])[:self.num_points]]
             pointcloud = translate_pointcloud(pointcloud)
             pointcloud = jitter_pointcloud(pointcloud)
-            np.random.shuffle(pointcloud)
+            # np.random.shuffle(pointcloud)
+        else:
+            pointcloud = self.data[item][:self.num_points]
+            # pointcloud = self.data[item][np.random.permutation(self.data.shape[1])[:self.num_points]]
         return pointcloud, label
 
     def __len__(self):
@@ -81,8 +86,37 @@ class ModelNet40(Dataset):
 
 
 if __name__ == '__main__':
-    train = ModelNet40(1024)
-    test = ModelNet40(1024, 'test')
-    for data, label in train:
-        print(data.shape)
-        print(label.shape)
+    train = ModelNet40(512)
+    test = ModelNet40(512, 'test')
+    vis = o3d.visualization.Visualizer()
+    vis.create_window(visible=True)
+    pcd = o3d.geometry.PointCloud()
+    for i, (data, label) in enumerate(train):
+        if i < 20:            
+            pcd.points = o3d.utility.Vector3dVector(data)
+            vis.add_geometry(pcd)
+
+            ctr = vis.get_view_control()
+            ctr.set_front([1,1,-1])
+            ctr.set_up([0,1,0])
+            ctr.set_zoom(0.9)
+
+            vis.update_geometry(pcd)
+            vis.poll_events()
+            vis.update_renderer()
+            time.sleep(1)
+            vis.capture_screen_image('{}b.png'.format(i))
+            vis.remove_geometry(pcd)
+
+            # pcd = o3d.geometry.PointCloud()
+            # pcd.points = o3d.utility.Vector3dVector(data)
+            # o3d.visualization.draw_geometries([pcd],
+            #                         zoom=1,
+            #                         front=[1, 1, -1],
+            #                         lookat=[0, 0, 0],
+            #                         up=[0, 1, 0])
+            print(data.shape)
+
+            print(label.shape)
+        else:
+            break

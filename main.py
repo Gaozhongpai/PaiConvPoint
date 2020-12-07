@@ -17,7 +17,8 @@ import torch.nn.functional as F
 import torch.optim as optim
 from torch.optim.lr_scheduler import CosineAnnealingLR
 from data import ModelNet40
-from model import PointNet, DGCNN, PaiNet
+# from pai_model import PaiNet
+from model_sampling import PointNet, DGCNN, PaiNet
 import numpy as np
 from torch.utils.data import DataLoader
 from util import cal_loss, IOStream
@@ -173,8 +174,8 @@ def test(args, io):
     print(str(model))
     # model = DGCNN(args).to(device)
     model = nn.DataParallel(model)
-    if os.path.exists('checkpoints/%s/models/model_%s_2048.t7'% (args.exp_name, args.model)):
-        checkpoint_dict = torch.load('./checkpoints/%s/models/model_%s_2048.t7'% (args.exp_name, args.model), map_location=device)
+    if os.path.exists('checkpoints/%s/models/model_%s.t7'% (args.exp_name, args.model)):
+        checkpoint_dict = torch.load('./checkpoints/%s/models/model_%s.t7'% (args.exp_name, args.model), map_location=device)
         # pretrained_dict = {}
         # for k, v in checkpoint_dict.items():
         #     if 'transform' in k:
@@ -209,14 +210,14 @@ def test(args, io):
 if __name__ == "__main__":
     # Training settings
     parser = argparse.ArgumentParser(description='Point Cloud Recognition')
-    parser.add_argument('--exp_name', type=str, default='exp', metavar='N',
+    parser.add_argument('--exp_name', type=str, default='sampling-1024-2048-32-rand', metavar='N',
                         help='Name of the experiment')
     parser.add_argument('--model', type=str, default='paigcnn', metavar='N',
                         choices=['pointnet', 'paigcnn', 'dgcnn'],
                         help='Model to use, [pointnet, dgcnn]')
     parser.add_argument('--dataset', type=str, default='modelnet40', metavar='N',
                         choices=['modelnet40'])
-    parser.add_argument('--batch_size', type=int, default=32, metavar='batch_size',
+    parser.add_argument('--batch_size', type=int, default=24, metavar='batch_size',
                         help='Size of batch)')
     parser.add_argument('--test_batch_size', type=int, default=16, metavar='batch_size',
                         help='Size of batch)')
@@ -234,14 +235,16 @@ if __name__ == "__main__":
                         help='random seed (default: 1)')
     parser.add_argument('--eval', type=bool,  default=False,
                         help='evaluate the model')
-    parser.add_argument('--num_points', type=int, default=2048,
+    parser.add_argument('--num_points', type=int, default=1024,
                         help='num of points to use')
     parser.add_argument('--dropout', type=float, default=0.5,
                         help='dropout rate')
-    parser.add_argument('--emb_dims', type=int, default=2048, metavar='N',
+    parser.add_argument('--emb_dims', type=int, default=1024, metavar='N',
                         help='Dimension of embeddings')
-    parser.add_argument('--k', type=int, default=40, metavar='N',
+    parser.add_argument('--k', type=int, default=32, metavar='N',
                         help='Num of nearest neighbors to use')
+    parser.add_argument('--temp_factor', type=int, default=100, metavar='N',
+                        help='Factor to control the softmax precision')
     parser.add_argument('--model_path', type=str, default='', metavar='N',
                         help='Pretrained model path')
     args = parser.parse_args()

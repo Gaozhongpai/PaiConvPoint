@@ -1,0 +1,5 @@
+checkpoints
+data
+backup
+pretrained
+*.pyc
