@@ -191,18 +191,21 @@ class TemperatureNet(nn.Module):
 
 
 class PaiConv(nn.Module):
-    def __init__(self, in_c, out_c, kernels, k, num_neighbor, dilation=1, bias=True): # ,device=None):
+    def __init__(self, in_c, out_c, k, num_neighbor, dilation=1, bias=True): # ,device=None):
         super(PaiConv, self).__init__()
         self.k = k
-        self.num_neighbor = num_neighbor
+        self.num_neighbor = math.ceil(k / dilation)
         self.in_c = in_c
         self.out_c = out_c
         self.dilation = dilation
-        self.kernels = kernels
-        self.one_padding = nn.Parameter(torch.zeros(self.k, self.num_neighbor), requires_grad=False)
+        self.map_size = 32
+        self.B = nn.Parameter(torch.randn(7, self.map_size) , requires_grad=False)  
+        self.kernels = nn.Parameter(torch.tensor(fibonacci_sphere(self.num_neighbor)).transpose(0, 1), requires_grad=False)
+        self.one_padding = nn.Parameter(torch.zeros(self.num_neighbor, self.num_neighbor), requires_grad=False)
         self.one_padding.data[0, 0] = 1
-        self.mlp = nn.Conv1d(7, in_c, kernel_size=1, bias=bias)
+        self.mlp = nn.Conv1d(self.map_size*2, in_c, kernel_size=1, bias=bias)
         self.conv = nn.Linear(2*in_c*self.num_neighbor, out_c,bias=bias)
+        self.group = 4
         # self.mlp_out = nn.Conv1d(in_c, out_c, kernel_size=1, bias=bias)
         self.bn = nn.BatchNorm1d(out_c)
 
@@ -216,7 +219,7 @@ class PaiConv(nn.Module):
     def forward(self, x, feature, neigh_indexs):
         bsize, num_feat, num_pts = feature.size()
         x = x.permute(0, 2, 1).contiguous()
-        neigh_index = neigh_indexs[:, :, :self.k*self.dilation:self.dilation]
+        neigh_index = neigh_indexs[:, :, :self.k:self.dilation]
         x = x.view(bsize*num_pts, 3)
 
         idx_base = torch.arange(0, bsize, device=x.device).view(-1, 1, 1)*num_pts
@@ -227,7 +230,8 @@ class PaiConv(nn.Module):
         x_repeat = x_neighs[:, 0:1, :].expand_as(x_neighs)
         x_relative = x_neighs - x_repeat
         x_dis = torch.norm(x_relative, dim=-1, keepdim=True)
-        x_feats = torch.cat([x_repeat, x_relative, x_dis], dim=-1)
+        x_feats = 2.*math.pi*torch.cat([x_repeat, x_relative, x_dis], dim=-1) @ self.B
+        x_feats = torch.cat([torch.sin(x_feats), torch.cos(x_feats)], dim=-1)
         x_feats = self.mlp(x_feats.permute(0, 2, 1).contiguous())
 
         feats = feature.permute(0, 2, 1).contiguous().view(bsize*num_pts, num_feat)
@@ -240,6 +244,8 @@ class PaiConv(nn.Module):
         permatrix = torch.where(permatrix > 0, permatrix, torch.full_like(permatrix, 0.))  # permatrix[permatrix < 0] = torch.min(permatrix)*5
         permatrix = self.topkmax(permatrix)
 
+        if num_feat > 3: ## channel shuffle
+            feats = feats.view(bsize*num_pts,self.group, 2*num_feat//self.group,-1).permute(0,2,1,3).reshape(bsize*num_pts, 2*num_feat,-1)
         feats = torch.matmul(feats, permatrix) 
         feats = feats.view(bsize*num_pts, 2*num_feat*self.num_neighbor)
         out_feat = self.conv(feats).view(bsize,num_pts,self.out_c)  
@@ -255,16 +261,15 @@ class PaiNet(nn.Module):
         self.k = args.k
         num_kernel = args.k
         self.num_layers = 4
-        self.knn = knn3(self.k*self.num_layers)
+        self.knn = knn3(self.k)
 
         self.bn5 = nn.BatchNorm1d(args.emb_dims)
         self.activation = nn.LeakyReLU(negative_slope=0.2)
-        self.kernals = nn.Parameter(torch.tensor(fibonacci_sphere(num_kernel)).transpose(0, 1), requires_grad=False)
 
-        self.conv1 = PaiConv(3, 64, self.kernals, self.k, num_kernel, 1)
-        self.conv2 = PaiConv(64, 64, self.kernals, self.k, num_kernel, 2)
-        self.conv3 = PaiConv(64, 128, self.kernals, self.k, num_kernel, 3)
-        self.conv4 = PaiConv(128, 256, self.kernals, self.k, num_kernel, 4)
+        self.conv1 = PaiConv(3, 64, self.k, num_kernel, 1)
+        self.conv2 = PaiConv(64, 64, self.k, num_kernel, 2)
+        self.conv3 = PaiConv(64, 128, self.k, num_kernel, 3)
+        self.conv4 = PaiConv(128, 256, self.k, num_kernel, 4)
         self.conv5 = nn.Sequential(nn.Conv1d(512, args.emb_dims, kernel_size=1, bias=False),
                                    self.bn5)
         self.linear1 = nn.Linear(args.emb_dims*2, 512, bias=False)
