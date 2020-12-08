@@ -108,7 +108,7 @@ def point_loader_train(input):
     #noise = torch.empty_like(data).normal_(0, 0.001)
     #data = data + noise
 
-    pointcloud = data[torch.randperm(data.shape[0])[:8196]]
+    pointcloud = data[torch.randperm(data.shape[0])[:8192]]
     pointcloud = translate_pointcloud_tensor(pointcloud)
     pointcloud = jitter_pointcloud_tensor(pointcloud)
     # np.random.shuffle(pointcloud)
@@ -121,7 +121,7 @@ def point_loader_test(input):
     mesh = torch.load(input)
     data = mesh['data']
     # pointcloud = data[:8196]
-    pointcloud = data[torch.randperm(data.shape[0])[:8196]]
+    pointcloud = data[torch.randperm(data.shape[0])[:8192]]
     return pointcloud
 
 if __name__ == '__main__':

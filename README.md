@@ -34,6 +34,14 @@ python main.py --exp_name=paigcnn_1024_eval --model=paigcnn --num_points=1024 --
 python main.py --exp_name=paigcnn_2048_eval --model=paigcnn --num_points=2048 --k=40 --use_sgd=True --eval=True --model_path=pretrained/model.2048.t7
 ```
 
+# Data Organization
+
+The following is the organization of the dataset for 8192 points expected by the code:
+
+    * dataset/
+        * train/ (created by data_generation.py)
+        * test/ (created by data_generation.py)
+
 #### Acknowlegements:
 
 The structure of this codebase is borrowed from [DGCNN](https://github.com/WangYueFt/dgcnn).

@@ -221,13 +221,13 @@ def test(args, io):
 if __name__ == "__main__":
     # Training settings
     parser = argparse.ArgumentParser(description='Point Cloud Recognition')
-    parser.add_argument('--exp_name', type=str, default='dilated-1024-2048-32-rand_changek', metavar='N',
+    parser.add_argument('--exp_name', type=str, default='sampling-8192-2048-32-rand_changek', metavar='N',
                         help='Name of the experiment')
     parser.add_argument('--model', type=str, default='paigcnn', metavar='N',
                         choices=['pointnet', 'paigcnn', 'dgcnn'],
                         help='Model to use, [pointnet, dgcnn]')
     parser.add_argument('--dataset', type=str, default='/media/pai/data/modelnet40_normal_resampled/Processed/sliced', metavar='N')
-    parser.add_argument('--batch_size', type=int, default=24, metavar='batch_size',
+    parser.add_argument('--batch_size', type=int, default=16, metavar='batch_size',
                         help='Size of batch)')
     parser.add_argument('--test_batch_size', type=int, default=16, metavar='batch_size',
                         help='Size of batch)')
@@ -251,7 +251,7 @@ if __name__ == "__main__":
                         help='dropout rate')
     parser.add_argument('--emb_dims', type=int, default=1024, metavar='N',
                         help='Dimension of embeddings')
-    parser.add_argument('--k', type=int, default=36, metavar='N',
+    parser.add_argument('--k', type=int, default=32, metavar='N',
                         help='Num of nearest neighbors to use')
     parser.add_argument('--temp_factor', type=int, default=100, metavar='N',
                         help='Factor to control the softmax precision')
