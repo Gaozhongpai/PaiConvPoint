@@ -42,30 +42,20 @@ class RandLANet(nn.Module):
         out_feat = self.bn(out_feat.permute(0, 2, 1).contiguous())      
         return out_feat
     
-class PaiIndexMatrix(nn.Module):
+class PaiIndexMatrixLSA(nn.Module):
     def __init__(self, args, kernel_size):
-        super(PaiIndexMatrix, self).__init__()
+        super(PaiIndexMatrixLSA, self).__init__()
         self.k = args.k
-        
+        self.temp_factor = args.temp_factor
         self.kernel_size = kernel_size
-        # self.kernels = nn.Parameter(torch.rand(3, self.kernel_size) - 0.5, requires_grad=False)
-        self.kernels = nn.Parameter(torch.tensor(fibonacci_sphere(self.kernel_size)).transpose(0, 1), requires_grad=False)
-        # self.A = nn.Parameter(torch.randn(3, 3))
-        
-        self.one_padding = nn.Parameter(torch.zeros(self.k, self.kernel_size), requires_grad=False)
-        self.one_padding.data[0, 0] = 1
-        
-        # self.temp_factor = args.temp_factor
-        # self.temp_net = TemperatureNet(args)
-        # self.softmax = nn.Softmax(dim=1) # Sparsemax(dim=-1) #
-        # self.sinkhorn = Sinkhorn(max_iter=10, is_norm=False, is_log=False)
-        
-        # self.mlp = nn.Conv1d(10, 16, kernel_size=1, bias=False)
-        # self.mlp_out = nn.Conv1d(3, 16, kernel_size=1, bias=False)
-        # self.conv = nn.Linear(16*self.kernel_size,16,bias=True)
-        # self.bn = nn.BatchNorm1d(16)
-        # self.reset_parameters()
-    
+        map_size = 64
+        num_bases = 16
+        self.B = nn.Parameter(torch.randn(7*self.k, map_size) , requires_grad=False)  
+        self.mlp = nn.Linear(map_size*2, num_bases)
+        self.permatrix = nn.Parameter(torch.randn(num_bases, kernel_size, kernel_size), requires_grad=True)
+        self.permatrix.data = torch.eye(kernel_size).unsqueeze(0).expand_as(self.permatrix)
+        self.softmax = Sparsemax(dim=-1) #
+
     def forward(self, x):
         bsize, num_feat, num_pts = x.size()
         neigh_indexs = knn(x, self.k)
@@ -74,37 +64,15 @@ class PaiIndexMatrix(nn.Module):
         feats = x.permute(0, 2, 1).contiguous().view(bsize*num_pts, num_feat)
         feats = feats[neigh_indexs,:].view(bsize*num_pts, self.k, num_feat)
         
-        # #### relative position ####
-        # x_repeat = feats[:, 0:1, :].expand_as(feats)
-        # x_relative = feats - x_repeat
-        # x_dis = torch.norm(x_relative, dim=-1, keepdim=True)
-        # x_feats = torch.cat([feats, x_repeat, x_relative, x_dis], dim=-1)
-        
-        x_relative = feats - feats[:, 0:1, :]
-        ####### Euclidean distance ########
-        # permatrix = - torch.norm(x_relative[:, :, None, :] - 
-        #             self.kernels.transpose(0, 1)[None, None, :, :], dim=3)
-        # permatrix = (permatrix - torch.min(permatrix, dim=1, keepdim=True)[0]) / \
-        #             (torch.max(permatrix, dim=1, keepdim=True)[0] - torch.min(permatrix, dim=1, keepdim=True)[0])
-        ######## cosine distance ##########
-        # permatrix = torch.matmul(torch.matmul(x_relative, 
-        #     (self.A + self.A.transpose(0, 1)) / 2), self.kernels)
-
-        permatrix = torch.matmul(x_relative, self.kernels)
-        permatrix = (permatrix + self.one_padding) #
-        permatrix = torch.where(permatrix > 0, permatrix, torch.full_like(permatrix, 0.))  # permatrix[permatrix < 0] = torch.min(permatrix)*5
-        permatrix = topkmax(permatrix)
-
-        # temp = self.temp_net(x_relative)
-        # permatrix = self.softmax(permatrix / temp)
-        # permatrix = self.sinkhorn(permatrix, temp)
-        
-        ##### first feature #####
-        # feats = self.mlp(x_feats.permute(0, 2, 1).contiguous())
-        # feats = torch.matmul(feats, permatrix)
-        # feats = feats.view(bsize*num_pts, 16*self.kernel_size)
-        # out_feat = self.conv(feats).view(bsize,num_pts,16)  
-        # out_feat = self.bn(out_feat.permute(0, 2, 1).contiguous() + self.mlp_out(x))  
+        #### relative position ####
+        x_repeat = feats[:, 0:1, :].expand_as(feats)
+        x_relative = feats - x_repeat
+        x_dis = torch.norm(x_relative, dim=-1, keepdim=True)
+        x_feats = torch.cat([x_repeat, x_relative, x_dis], dim=-1).view(bsize*num_pts, -1)
+        x_feats = 2.*math.pi*x_feats @ self.B
+        x_feats = torch.cat([torch.sin(x_feats), torch.cos(x_feats)], dim=-1)
+        x_feats = self.softmax(self.mlp(x_feats))
+        permatrix = torch.einsum('bi, ikt->bkt', x_feats, self.permatrix)
         return neigh_indexs, permatrix #, F.gelu(out_feat)
 
 class PaiConv(nn.Module):
@@ -115,60 +83,50 @@ class PaiConv(nn.Module):
         self.in_c = in_c
         self.out_c = out_c
         self.group = 4
-        # self.mlp = nn.Conv1d(7, in_c, kernel_size=1, bias=False)
-        self.conv = nn.Linear(in_c*self.kernel_size,out_c,bias=bias)
+        map_size = 32
+        num_bases = 32
+        self.B = nn.Parameter(torch.randn(7*self.k, map_size) , requires_grad=False) 
+        self.mlp = nn.Linear(map_size*2, num_bases, bias=False)
+        self.permatrix = nn.Parameter(torch.randn(num_bases, kernel_size, kernel_size), requires_grad=True)
+        self.permatrix.data = torch.eye(kernel_size).unsqueeze(0).expand_as(self.permatrix) 
+        self.softmax = Sparsemax(dim=-1) #
+        self.conv = nn.Conv1d(in_c,out_c, kernel_size=1,bias=bias)
         self.bn = nn.BatchNorm1d(out_c)
 
-    def forward(self, feature, neigh_indexs, permatrix):
+    def forward(self, x, feature, neigh_indexs):
         bsize, num_feat, num_pts = feature.size()
         feature = feature.permute(0, 2, 1).contiguous().view(bsize*num_pts, num_feat)
-        
+        x = x.permute(0, 2, 1).contiguous().view(bsize*num_pts, -1)
+
+        x_feats = x[neigh_indexs,:].view(bsize*num_pts, self.k, -1)
+
+        x_repeat = x_feats[:, 0:1, :].expand_as(x_feats)
+        x_relative = x_feats - x_repeat
+        x_dis = torch.norm(x_relative, dim=-1, keepdim=True)
+        x_feats = torch.cat([x_repeat, x_relative, x_dis], dim=-1).view(bsize*num_pts, -1)
+        x_feats = 2.*math.pi*x_feats @ self.B
+        x_feats = torch.cat([torch.sin(x_feats), torch.cos(x_feats)], dim=-1)
+        x_feats = self.softmax(self.mlp(x_feats))
+        permatrix = torch.einsum('bi, ikt->bkt', x_feats, self.permatrix)
+
         feats = feature[neigh_indexs,:].view(bsize*num_pts, self.k, num_feat)
         feats = feats.permute(0, 2, 1).contiguous()
         
-        # x_feat = self.mlp(x_feat.permute(0, 2, 1).contiguous())
-        # feats = torch.cat([x_feat, feats], dim=1)
-
         if num_feat > 3: ## channel shuffle
             feats = feats.view(bsize*num_pts,self.group, num_feat//self.group,-1).permute(0,2,1,3).reshape(bsize*num_pts, num_feat,-1)
         feats = torch.matmul(feats, permatrix)
-        feats = feats.view(bsize*num_pts, num_feat*self.kernel_size)
 
-        out_feat = self.conv(feats).view(bsize,num_pts,self.out_c)  
+        out_feat = torch.max(self.conv(feats), dim=-1)[0].view(bsize, num_pts, self.out_c)
         out_feat = self.bn(out_feat.permute(0, 2, 1).contiguous())      
         return out_feat
 
-class PaiConvDG(nn.Module):
-    def __init__(self, in_c, out_c, k, kernel_size=20, bias=True): # ,device=None):
-        super(PaiConvDG, self).__init__()
-        self.k = k
-        self.kernel_size = kernel_size
-        self.in_c = in_c
-        self.out_c = out_c
-        self.conv = nn.Conv2d(in_c*2, out_c, kernel_size=1, bias=bias)
-        self.bn = nn.BatchNorm1d(out_c)
-
-    def forward(self, feature, neigh_indexs, permatrix):
-        bsize, num_feat, num_pts = feature.size()
-        feature = feature.permute(0, 2, 1).contiguous().view(bsize*num_pts, num_feat)
-        
-        feats = feature[neigh_indexs,:].view(bsize*num_pts, self.k, num_feat)
-        feats = feats.permute(0, 2, 1).contiguous()
-
-        feats = torch.matmul(feats, permatrix)
-        feature = feats.view(bsize, num_pts, self.k, -1)
-        feature = self.conv(feature.permute(0, 3, 1, 2).contiguous())
-        out_feat = self.bn(torch.max(feature, dim=-1)[0])
-        return out_feat
-    
 
 class PaiNet(nn.Module):
     def __init__(self, args, output_channels=40):
         super(PaiNet, self).__init__()
         self.args = args
         self.k = args.k
-        num_kernel = 16
-        self.paiIdxMatrix = PaiIndexMatrix(args, kernel_size=num_kernel)
+        num_kernel = self.k
         self.bn5 = nn.BatchNorm1d(args.emb_dims)
         self.activation = nn.LeakyReLU(negative_slope=0.2)
 
@@ -188,7 +146,7 @@ class PaiNet(nn.Module):
         # self.transform_net = Transform_Net(args)
 
     def forward(self, x):
-        batch_size, num_feat, num_pts = x.size()
+        bsize, num_feat, num_pts = x.size()
 
         # x0 = get_graph_feature(x, k=self.k)     # (batch_size, 3, num_points) -> (batch_size, 3*2, num_points, k)
         # t = self.transform_net(x0)              # (batch_size, 3, 3)
@@ -196,24 +154,24 @@ class PaiNet(nn.Module):
         # x = torch.bmm(x, t)                     # (batch_size, num_points, 3) * (batch_size, 3, 3) -> (batch_size, num_points, 3)
         # x = x.transpose(2, 1) 
 
-        neigh_indexs, permatrix = self.paiIdxMatrix(x) 
+        neigh_indexs = knn(x, self.k)
         
-        feature = F.gelu(self.conv1(x, neigh_indexs, permatrix))
+        feature = F.gelu(self.conv1(x, x, neigh_indexs))
         x1 = feature.clone()
 
-        feature = F.gelu(self.conv2(feature, neigh_indexs, permatrix))
+        feature = F.gelu(self.conv2(x, feature, neigh_indexs))
         x2 = feature.clone()
         
-        feature = F.gelu(self.conv3(feature, neigh_indexs, permatrix))
+        feature = F.gelu(self.conv3(x, feature, neigh_indexs))
         x3 = feature.clone()
 
-        feature = F.gelu(self.conv4(feature, neigh_indexs, permatrix))
+        feature = F.gelu(self.conv4(x, feature, neigh_indexs))
         x4 = feature.clone()
 
         x = torch.cat((x1, x2, x3, x4), dim=1)
         x = F.gelu(self.conv5(x))
-        x1 = F.adaptive_max_pool1d(x, 1).view(batch_size, -1)
-        x2 = F.adaptive_avg_pool1d(x, 1).view(batch_size, -1)
+        x1 = F.adaptive_max_pool1d(x, 1).view(bsize, -1)
+        x2 = F.adaptive_avg_pool1d(x, 1).view(bsize, -1)
         x = torch.cat((x1, x2), 1)
 
         x = F.gelu(self.bn6(self.linear1(x)))
