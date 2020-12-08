@@ -210,7 +210,7 @@ def test(args, io):
 if __name__ == "__main__":
     # Training settings
     parser = argparse.ArgumentParser(description='Point Cloud Recognition')
-    parser.add_argument('--exp_name', type=str, default='share-1024-2048-32', metavar='N',
+    parser.add_argument('--exp_name', type=str, default='isotropic-1024-2048-32', metavar='N',
                         help='Name of the experiment')
     parser.add_argument('--model', type=str, default='paigcnn', metavar='N',
                         choices=['pointnet', 'paigcnn', 'dgcnn'],
@@ -241,7 +241,7 @@ if __name__ == "__main__":
                         help='dropout rate')
     parser.add_argument('--emb_dims', type=int, default=1024, metavar='N',
                         help='Dimension of embeddings')
-    parser.add_argument('--k', type=int, default=36, metavar='N',
+    parser.add_argument('--k', type=int, default=32, metavar='N',
                         help='Num of nearest neighbors to use')
     parser.add_argument('--temp_factor', type=int, default=100, metavar='N',
                         help='Factor to control the softmax precision')

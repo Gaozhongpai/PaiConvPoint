@@ -41,39 +41,6 @@ class RandLANet(nn.Module):
         out_feat = self.conv(feats).view(bsize,num_pts,self.out_c)  
         out_feat = self.bn(out_feat.permute(0, 2, 1).contiguous())      
         return out_feat
-    
-class PaiIndexMatrixLSA(nn.Module):
-    def __init__(self, args, kernel_size):
-        super(PaiIndexMatrixLSA, self).__init__()
-        self.k = args.k
-        self.temp_factor = args.temp_factor
-        self.kernel_size = kernel_size
-        map_size = 64
-        num_bases = 16
-        self.B = nn.Parameter(torch.randn(7*self.k, map_size) , requires_grad=False)  
-        self.mlp = nn.Linear(map_size*2, num_bases)
-        self.permatrix = nn.Parameter(torch.randn(num_bases, kernel_size, kernel_size), requires_grad=True)
-        self.permatrix.data = torch.eye(kernel_size).unsqueeze(0).expand_as(self.permatrix)
-        self.softmax = Sparsemax(dim=-1) #
-
-    def forward(self, x):
-        bsize, num_feat, num_pts = x.size()
-        neigh_indexs = knn(x, self.k)
-        idx_base = torch.arange(0, bsize, device=x.device).view(-1, 1, 1)*num_pts
-        neigh_indexs = (neigh_indexs + idx_base).view(-1) # bsize*num_pts*spiral_size
-        feats = x.permute(0, 2, 1).contiguous().view(bsize*num_pts, num_feat)
-        feats = feats[neigh_indexs,:].view(bsize*num_pts, self.k, num_feat)
-        
-        #### relative position ####
-        x_repeat = feats[:, 0:1, :].expand_as(feats)
-        x_relative = feats - x_repeat
-        x_dis = torch.norm(x_relative, dim=-1, keepdim=True)
-        x_feats = torch.cat([x_repeat, x_relative, x_dis], dim=-1).view(bsize*num_pts, -1)
-        x_feats = 2.*math.pi*x_feats @ self.B
-        x_feats = torch.cat([torch.sin(x_feats), torch.cos(x_feats)], dim=-1)
-        x_feats = self.softmax(self.mlp(x_feats))
-        permatrix = torch.einsum('bi, ikt->bkt', x_feats, self.permatrix)
-        return neigh_indexs, permatrix #, F.gelu(out_feat)
 
 class PaiConv(nn.Module):
     def __init__(self, in_c, out_c, k, kernel_size=20, bias=True): # ,device=None):
@@ -83,40 +50,23 @@ class PaiConv(nn.Module):
         self.in_c = in_c
         self.out_c = out_c
         self.group = 4
-        map_size = 32
-        num_bases = 32
-        self.B = nn.Parameter(torch.randn(7*self.k, map_size) , requires_grad=False) 
-        self.mlp = nn.Linear(map_size*2, num_bases, bias=False)
-        self.permatrix = nn.Parameter(torch.randn(num_bases, kernel_size, kernel_size), requires_grad=True)
-        self.permatrix.data = torch.eye(kernel_size).unsqueeze(0).expand_as(self.permatrix) 
-        self.softmax = Sparsemax(dim=-1) #
-        self.conv = nn.Conv1d(in_c,out_c, kernel_size=1,bias=bias)
+        
+        self.conv = nn.Linear(in_c,out_c,bias=bias)
         self.bn = nn.BatchNorm1d(out_c)
 
-    def forward(self, x, feature, neigh_indexs):
+    def forward(self, feature, neigh_indexs, permatrix):
         bsize, num_feat, num_pts = feature.size()
         feature = feature.permute(0, 2, 1).contiguous().view(bsize*num_pts, num_feat)
-        x = x.permute(0, 2, 1).contiguous().view(bsize*num_pts, -1)
-
-        x_feats = x[neigh_indexs,:].view(bsize*num_pts, self.k, -1)
-
-        x_repeat = x_feats[:, 0:1, :].expand_as(x_feats)
-        x_relative = x_feats - x_repeat
-        x_dis = torch.norm(x_relative, dim=-1, keepdim=True)
-        x_feats = torch.cat([x_repeat, x_relative, x_dis], dim=-1).view(bsize*num_pts, -1)
-        x_feats = 2.*math.pi*x_feats @ self.B
-        x_feats = torch.cat([torch.sin(x_feats), torch.cos(x_feats)], dim=-1)
-        x_feats = self.softmax(self.mlp(x_feats))
-        permatrix = torch.einsum('bi, ikt->bkt', x_feats, self.permatrix)
-
+        
         feats = feature[neigh_indexs,:].view(bsize*num_pts, self.k, num_feat)
         feats = feats.permute(0, 2, 1).contiguous()
         
         if num_feat > 3: ## channel shuffle
             feats = feats.view(bsize*num_pts,self.group, num_feat//self.group,-1).permute(0,2,1,3).reshape(bsize*num_pts, num_feat,-1)
         feats = torch.matmul(feats, permatrix)
+        feats = feats.view(bsize*num_pts, num_feat*self.kernel_size)
 
-        out_feat = torch.max(self.conv(feats), dim=-1)[0].view(bsize, num_pts, self.out_c)
+        out_feat = self.conv(feats).view(bsize, num_pts, self.out_c)
         out_feat = self.bn(out_feat.permute(0, 2, 1).contiguous())      
         return out_feat
 
@@ -126,9 +76,16 @@ class PaiNet(nn.Module):
         super(PaiNet, self).__init__()
         self.args = args
         self.k = args.k
-        num_kernel = self.k
-        self.bn5 = nn.BatchNorm1d(args.emb_dims)
+        num_kernel = args.k
         self.activation = nn.LeakyReLU(negative_slope=0.2)
+
+        map_size = 32
+        num_bases = 16
+        self.B = nn.Parameter(torch.randn(7*self.k, map_size) , requires_grad=False) 
+        self.mlp = nn.Linear(map_size*2, num_bases, bias=False)
+        self.permatrix = nn.Parameter(torch.randn(num_bases, num_kernel, num_kernel), requires_grad=True)
+        self.permatrix.data = torch.eye(num_kernel).unsqueeze(0).expand_as(self.permatrix) 
+        self.softmax = Sparsemax(dim=-1) #
 
         self.conv1 = PaiConv(3, 64, self.k, num_kernel)
         self.conv2 = PaiConv(64, 64, self.k, num_kernel)
@@ -136,6 +93,7 @@ class PaiNet(nn.Module):
         self.conv4 = PaiConv(128, 256, self.k, num_kernel)
         self.conv5 = nn.Sequential(nn.Conv1d(512, args.emb_dims, kernel_size=1, bias=False),
                                    self.bn5)
+        self.bn5 = nn.BatchNorm1d(args.emb_dims)
         self.linear1 = nn.Linear(args.emb_dims*2, 512, bias=False)
         self.bn6 = nn.BatchNorm1d(512)
         self.dp1 = nn.Dropout(p=args.dropout)
@@ -143,7 +101,23 @@ class PaiNet(nn.Module):
         self.bn7 = nn.BatchNorm1d(256)
         self.dp2 = nn.Dropout(p=args.dropout)
         self.linear3 = nn.Linear(256, output_channels)
-        # self.transform_net = Transform_Net(args)
+
+    def permatrix_lsa(self, neigh_indexs, x):
+        bsize, num_feat, num_pts = x.size()
+
+        x_feats = x.permute(0, 2, 1).contiguous().view(bsize*num_pts, -1)
+        x_feats = x_feats[neigh_indexs,:].view(bsize*num_pts, self.k, -1)
+        x_repeat = x_feats[:, 0:1, :].expand_as(x_feats)
+        x_relative = x_feats - x_repeat
+        x_dis = torch.norm(x_relative, dim=-1, keepdim=True)
+        x_feats = torch.cat([x_repeat, x_relative, x_dis], dim=-1).view(bsize*num_pts, -1)
+        
+        x_feats = 2.*math.pi*x_feats @ self.B
+        x_feats = torch.cat([torch.sin(x_feats), torch.cos(x_feats)], dim=-1)
+        x_feats = self.softmax(self.mlp(x_feats))
+        
+        permatrix = torch.einsum('bi, ikt->bkt', x_feats, self.permatrix)
+        return permatrix
 
     def forward(self, x):
         bsize, num_feat, num_pts = x.size()
@@ -155,17 +129,18 @@ class PaiNet(nn.Module):
         # x = x.transpose(2, 1) 
 
         neigh_indexs = knn(x, self.k)
+        permatrix = self.permatrix_lsa(neigh_indexs, x)
         
-        feature = F.gelu(self.conv1(x, x, neigh_indexs))
+        feature = F.gelu(self.conv1(x, neigh_indexs, permatrix))
         x1 = feature.clone()
 
-        feature = F.gelu(self.conv2(x, feature, neigh_indexs))
+        feature = F.gelu(self.conv2(feature, neigh_indexs, permatrix))
         x2 = feature.clone()
         
-        feature = F.gelu(self.conv3(x, feature, neigh_indexs))
+        feature = F.gelu(self.conv3(feature, neigh_indexs, permatrix))
         x3 = feature.clone()
 
-        feature = F.gelu(self.conv4(x, feature, neigh_indexs))
+        feature = F.gelu(self.conv4(feature, neigh_indexs, permatrix))
         x4 = feature.clone()
 
         x = torch.cat((x1, x2, x3, x4), dim=1)
