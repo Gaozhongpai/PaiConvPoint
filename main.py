@@ -18,7 +18,7 @@ import torch.optim as optim
 from torch.optim.lr_scheduler import CosineAnnealingLR
 from data import ModelNet40
 # from pai_model import PaiNet
-from model_dilated_changek import PointNet, DGCNN, PaiNet
+from model import PointNet, DGCNN, PaiNet
 import numpy as np
 from torch.utils.data import DataLoader
 from util import cal_loss, IOStream
@@ -210,7 +210,7 @@ def test(args, io):
 if __name__ == "__main__":
     # Training settings
     parser = argparse.ArgumentParser(description='Point Cloud Recognition')
-    parser.add_argument('--exp_name', type=str, default='dilated-1024-2048-32-rand_changek', metavar='N',
+    parser.add_argument('--exp_name', type=str, default='share-1024-2048-32', metavar='N',
                         help='Name of the experiment')
     parser.add_argument('--model', type=str, default='paigcnn', metavar='N',
                         choices=['pointnet', 'paigcnn', 'dgcnn'],
