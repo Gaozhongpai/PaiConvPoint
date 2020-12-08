@@ -2,4 +2,5 @@ checkpoints
 data
 backup
 pretrained
+.vscode
 *.pyc

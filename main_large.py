@@ -135,36 +135,37 @@ def train(args, io):
         ####################
         # Test
         ####################
-        test_loss = 0.0
-        count = 0.0
-        model.eval()
-        test_pred = []
-        test_true = []
-        for data, label in test_loader:
-    
-            data, label = data.to(device), label.to(device).squeeze()
-            data = data.permute(0, 2, 1)
-            batch_size = data.size()[0]
-            logits = model(data)
-            loss = criterion(logits, label)
-            preds = logits.max(dim=1)[1]
-            count += batch_size
-            test_loss += loss.item() * batch_size
-            test_true.append(label.cpu().numpy())
-            test_pred.append(preds.detach().cpu().numpy())
-        test_true = np.concatenate(test_true)
-        test_pred = np.concatenate(test_pred)
-        test_acc = metrics.accuracy_score(test_true, test_pred)
-        avg_per_class_acc = metrics.balanced_accuracy_score(test_true, test_pred)
-        if test_acc >= best_test_acc:
-            best_test_acc = test_acc
-            torch.save(model.state_dict(), 'checkpoints/%s/models/model_%s.t7' % (args.exp_name, args.model))
-        outstr = 'Test %d, loss: %.6f, test acc: %.6f, test avg acc: %.6f, test best: %.6f' % (epoch,
-                                                                              test_loss*1.0/count,
-                                                                              test_acc,
-                                                                              avg_per_class_acc, 
-                                                                              best_test_acc)
-        io.cprint(outstr)
+        for _ in range(10):
+            test_loss = 0.0
+            count = 0.0
+            model.eval()
+            test_pred = []
+            test_true = []
+            for data, label in test_loader:
+        
+                data, label = data.to(device), label.to(device).squeeze()
+                data = data.permute(0, 2, 1)
+                batch_size = data.size()[0]
+                logits = model(data)
+                loss = criterion(logits, label)
+                preds = logits.max(dim=1)[1]
+                count += batch_size
+                test_loss += loss.item() * batch_size
+                test_true.append(label.cpu().numpy())
+                test_pred.append(preds.detach().cpu().numpy())
+            test_true = np.concatenate(test_true)
+            test_pred = np.concatenate(test_pred)
+            test_acc = metrics.accuracy_score(test_true, test_pred)
+            avg_per_class_acc = metrics.balanced_accuracy_score(test_true, test_pred)
+            if test_acc >= best_test_acc:
+                best_test_acc = test_acc
+                torch.save(model.state_dict(), 'checkpoints/%s/models/model_%s.t7' % (args.exp_name, args.model))
+            outstr = 'Test %d, loss: %.6f, test acc: %.6f, test avg acc: %.6f, test best: %.6f' % (epoch,
+                                                                                test_loss*1.0/count,
+                                                                                test_acc,
+                                                                                avg_per_class_acc, 
+                                                                                best_test_acc)
+            io.cprint(outstr)
 
 
 def test(args, io):
@@ -221,13 +222,13 @@ def test(args, io):
 if __name__ == "__main__":
     # Training settings
     parser = argparse.ArgumentParser(description='Point Cloud Recognition')
-    parser.add_argument('--exp_name', type=str, default='sampling-8192-2048-32-rand_changek', metavar='N',
+    parser.add_argument('--exp_name', type=str, default='sampling-8192-2048-32-rand', metavar='N',
                         help='Name of the experiment')
     parser.add_argument('--model', type=str, default='paigcnn', metavar='N',
                         choices=['pointnet', 'paigcnn', 'dgcnn'],
                         help='Model to use, [pointnet, dgcnn]')
     parser.add_argument('--dataset', type=str, default='/media/pai/data/modelnet40_normal_resampled/Processed/sliced', metavar='N')
-    parser.add_argument('--batch_size', type=int, default=16, metavar='batch_size',
+    parser.add_argument('--batch_size', type=int, default=24, metavar='batch_size',
                         help='Size of batch)')
     parser.add_argument('--test_batch_size', type=int, default=16, metavar='batch_size',
                         help='Size of batch)')
