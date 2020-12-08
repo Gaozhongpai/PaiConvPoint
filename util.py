@@ -11,6 +11,63 @@
 import numpy as np
 import torch
 import torch.nn.functional as F
+import random, math
+from pykeops.torch import generic_argkmin
+
+
+def topkmax(permatrix):
+    permatrix = permatrix / (torch.sum(permatrix, dim=1, keepdim=True) + 1e-6)
+    permatrix = permatrix * permatrix
+    permatrix = permatrix / (torch.sum(permatrix, dim=1, keepdim=True) + 1e-6)
+    permatrix = torch.where(permatrix > 0.1, permatrix, torch.full_like(permatrix, 0.)) 
+    return permatrix
+
+def knn3(K=20):
+    knn = generic_argkmin(
+        'SqDist(x, y)',
+        'a = Vi({})'.format(K),
+        'x = Vi({})'.format(3),
+        'y = Vj({})'.format(3),
+    )
+    return knn
+
+def mish(input):
+    '''
+    Applies the mish function element-wise:
+    mish(x) = x * tanh(softplus(x)) = x * tanh(ln(1 + exp(x)))
+    See additional documentation for mish class.
+    '''
+    return input * torch.tanh(F.softplus(input))
+
+def knn(x, k):
+    inner = -2*torch.matmul(x.transpose(2, 1), x)
+    xx = torch.sum(x**2, dim=1, keepdim=True)
+    pairwise_distance = -xx - inner - xx.transpose(2, 1)
+ 
+    idx = pairwise_distance.topk(k=k, dim=-1)[1]   # (batch_size, num_points, k)
+    return idx
+
+def fibonacci_sphere(samples=1,randomize=False):
+    rnd = 1.
+    if randomize:
+        rnd = random.random() * samples
+
+    points = [[0, 0, 0]]
+    offset = 2./samples
+    increment = math.pi * (3. - math.sqrt(5.))
+
+    for i in range(samples-1):
+        y = ((i * offset) - 1) + (offset / 2)
+        r = math.sqrt(1 - pow(y,2))
+
+        phi = ((i + rnd) % samples) * increment
+
+        x = math.cos(phi) * r
+        z = math.sin(phi) * r
+
+        points.append([x,y,z])
+
+    return points
 
 
 def cal_loss(pred, gold, smoothing=True):
