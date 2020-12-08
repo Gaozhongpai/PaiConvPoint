@@ -14,7 +14,7 @@ import glob
 import h5py
 import numpy as np
 from torch.utils.data import Dataset
-import open3d as o3d
+# import open3d as o3d
 import time
 import torch
 

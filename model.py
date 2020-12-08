@@ -167,7 +167,7 @@ class PaiNet(nn.Module):
         super(PaiNet, self).__init__()
         self.args = args
         self.k = args.k
-        num_kernel = 16
+        num_kernel = self.k
         self.paiIdxMatrix = PaiIndexMatrix(args, kernel_size=num_kernel)
         self.bn5 = nn.BatchNorm1d(args.emb_dims)
         self.activation = nn.LeakyReLU(negative_slope=0.2)
