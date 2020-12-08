@@ -16,9 +16,12 @@ import torch.nn as nn
 import torch.nn.functional as F
 import torch.optim as optim
 from torch.optim.lr_scheduler import CosineAnnealingLR
-from data import ModelNet40
+from data import ModelNet40, point_loader_test, point_loader_train
+import torch.utils.data as Data
+import torchvision.datasets as datasets
+
 # from pai_model import PaiNet
-from model_dilated_changek import PointNet, DGCNN, PaiNet
+from model_sampling import PointNet, DGCNN, PaiNet
 import numpy as np
 from torch.utils.data import DataLoader
 from util import cal_loss, IOStream
@@ -39,10 +42,17 @@ def _init_():
     os.system('cp data.py checkpoints' + '/' + args.exp_name + '/' + 'data.py.backup')
 
 def train(args, io):
-    train_loader = DataLoader(ModelNet40(partition='train', num_points=args.num_points), #num_workers=8,
-                              batch_size=args.batch_size, shuffle=True, drop_last=True)
-    test_loader = DataLoader(ModelNet40(partition='test', num_points=args.num_points), #num_workers=8,
-                             batch_size=args.test_batch_size, shuffle=True, drop_last=False)
+    # train_loader = DataLoader(ModelNet40(partition='train', num_points=args.num_points, num_workers=8,
+    #                           batch_size=args.batch_size, shuffle=True, drop_last=True)
+    # test_loader = DataLoader(ModelNet40(partition='test', num_points=args.num_points, num_workers=8,
+    #                          batch_size=args.test_batch_size, shuffle=True, drop_last=False)
+
+    point_loader = {"train": point_loader_train, "test": point_loader_test}
+    choose = {"train": True, "test": False}
+    image_datasets = {x: datasets.DatasetFolder(os.path.join(args.dataset, x), point_loader[x], "spl")
+                        for x in ['train', 'test']}
+    train_loader = Data.DataLoader(image_datasets['train'], batch_size=args.batch_size, shuffle=True, drop_last=choose['train'], num_workers=8)
+    test_loader = Data.DataLoader(image_datasets['test'], batch_size=args.batch_size, shuffle=True, drop_last=choose['test'], num_workers=8)
 
     device = torch.device("cuda" if args.cuda else "cpu")
 
@@ -158,8 +168,9 @@ def train(args, io):
 
 
 def test(args, io):
-    test_loader = DataLoader(ModelNet40(partition='test', num_points=args.num_points),
-                             batch_size=args.test_batch_size, shuffle=True, drop_last=False)
+
+    image_datasets = datasets.DatasetFolder(os.path.join(args.dataset, "test"), point_loader_test, "spl")
+    test_loader = Data.DataLoader(image_datasets['test'], batch_size=args.batch_size, shuffle=True, drop_last=False, num_workers=8)
 
     device = torch.device("cuda" if args.cuda else "cpu")
 
@@ -215,8 +226,7 @@ if __name__ == "__main__":
     parser.add_argument('--model', type=str, default='paigcnn', metavar='N',
                         choices=['pointnet', 'paigcnn', 'dgcnn'],
                         help='Model to use, [pointnet, dgcnn]')
-    parser.add_argument('--dataset', type=str, default='modelnet40', metavar='N',
-                        choices=['modelnet40'])
+    parser.add_argument('--dataset', type=str, default='/media/pai/data/modelnet40_normal_resampled/Processed/sliced', metavar='N')
     parser.add_argument('--batch_size', type=int, default=24, metavar='batch_size',
                         help='Size of batch)')
     parser.add_argument('--test_batch_size', type=int, default=16, metavar='batch_size',

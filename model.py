@@ -158,17 +158,17 @@ class RandLANet(nn.Module):
         self.bn = nn.BatchNorm1d(out_c)
         self.softmax = nn.Softmax(dim=1)
 
-    def forward(self, feature, spirals_index, permatrix):
-        bsize, feats, num_pts = feature.size()
-        feature = feature.permute(0, 2, 1).contiguous().view(bsize*num_pts, feats)
+    def forward(self, feature, neigh_indexs, permatrix):
+        bsize, num_feat, num_pts = feature.size()
+        feature = feature.permute(0, 2, 1).contiguous().view(bsize*num_pts, num_feat)
         
-        spirals = feature[spirals_index,:].view(bsize*num_pts, self.k, feats)
-        spirals = spirals.permute(0, 2, 1).contiguous()
+        feats = feature[neigh_indexs,:].view(bsize*num_pts, self.k, num_feat)
+        feats = feats.permute(0, 2, 1).contiguous()
         
-        spirals = torch.sum(self.softmax(self.mlp(spirals))*spirals, dim=-1) ## This is for RandLA-Net
-        spirals = spirals.view(bsize*num_pts, feats)
+        feats = torch.sum(self.softmax(self.mlp(feats))*feats, dim=-1) ## This is for RandLA-Net
+        feats = feats.view(bsize*num_pts, num_feat)
 
-        out_feat = self.conv(spirals).view(bsize,num_pts,self.out_c)  
+        out_feat = self.conv(feats).view(bsize,num_pts,self.out_c)  
         out_feat = self.bn(out_feat.permute(0, 2, 1).contiguous())      
         return out_feat
     
@@ -219,29 +219,21 @@ class PaiIndexMatrix(nn.Module):
         permatrix = torch.where(permatrix > 0.1, permatrix, torch.full_like(permatrix, 0.)) 
         return permatrix
 
-    # def topk2max(self, permatrix):
-    #     b, nb, k = permatrix.shape
-    #     idx = torch.topk(-permatrix, k=nb-3, dim=1)[1]
-    #     permatrix.scatter_(1, idx, 0)
-    #     permatrix = permatrix * permatrix
-    #     permatrix = permatrix / (torch.sum(permatrix, dim=1, keepdim=True) + 1e-6)
-    #     return permatrix
-
     def forward(self, x):
-        bsize, feats, num_pts = x.size()
-        spirals_index = knn(x, self.k)
+        bsize, num_feat, num_pts = x.size()
+        neigh_indexs = knn(x, self.k)
         idx_base = torch.arange(0, bsize, device=x.device).view(-1, 1, 1)*num_pts
-        spirals_index = (spirals_index + idx_base).view(-1) # bsize*num_pts*spiral_size
-        spirals = x.permute(0, 2, 1).contiguous().view(bsize*num_pts, feats)
-        spirals = spirals[spirals_index,:].view(bsize*num_pts, self.k, feats)
+        neigh_indexs = (neigh_indexs + idx_base).view(-1) # bsize*num_pts*spiral_size
+        feats = x.permute(0, 2, 1).contiguous().view(bsize*num_pts, num_feat)
+        feats = feats[neigh_indexs,:].view(bsize*num_pts, self.k, num_feat)
         
         # #### relative position ####
-        # x_repeat = spirals[:, 0:1, :].expand_as(spirals)
-        # x_relative = spirals - x_repeat
+        # x_repeat = feats[:, 0:1, :].expand_as(feats)
+        # x_relative = feats - x_repeat
         # x_dis = torch.norm(x_relative, dim=-1, keepdim=True)
-        # x_feats = torch.cat([spirals, x_repeat, x_relative, x_dis], dim=-1)
+        # x_feats = torch.cat([feats, x_repeat, x_relative, x_dis], dim=-1)
         
-        x_relative = spirals - spirals[:, 0:1, :]
+        x_relative = feats - feats[:, 0:1, :]
         ####### Euclidean distance ########
         # permatrix = - torch.norm(x_relative[:, :, None, :] - 
         #             self.kernels.transpose(0, 1)[None, None, :, :], dim=3)
@@ -261,12 +253,12 @@ class PaiIndexMatrix(nn.Module):
         # permatrix = self.sinkhorn(permatrix, temp)
         
         ##### first feature #####
-        # spirals = self.mlp(x_feats.permute(0, 2, 1).contiguous())
-        # spirals = torch.matmul(spirals, permatrix)
-        # spirals = spirals.view(bsize*num_pts, 16*self.kernel_size)
-        # out_feat = self.conv(spirals).view(bsize,num_pts,16)  
+        # feats = self.mlp(x_feats.permute(0, 2, 1).contiguous())
+        # feats = torch.matmul(feats, permatrix)
+        # feats = feats.view(bsize*num_pts, 16*self.kernel_size)
+        # out_feat = self.conv(feats).view(bsize,num_pts,16)  
         # out_feat = self.bn(out_feat.permute(0, 2, 1).contiguous() + self.mlp_out(x))  
-        return spirals_index, permatrix #, F.gelu(out_feat)
+        return neigh_indexs, permatrix #, F.gelu(out_feat)
 
 
 class PaiIndexMatrixLSA(nn.Module):
@@ -283,23 +275,23 @@ class PaiIndexMatrixLSA(nn.Module):
         self.softmax = Sparsemax(dim=-1) #
 
     def forward(self, x):
-        bsize, feats, num_pts = x.size()
-        spirals_index = knn(x, self.k)
+        bsize, num_feat, num_pts = x.size()
+        neigh_indexs = knn(x, self.k)
         idx_base = torch.arange(0, bsize, device=x.device).view(-1, 1, 1)*num_pts
-        spirals_index = (spirals_index + idx_base).view(-1) # bsize*num_pts*spiral_size
-        spirals = x.permute(0, 2, 1).contiguous().view(bsize*num_pts, feats)
-        spirals = spirals[spirals_index,:].view(bsize*num_pts, self.k, feats)
+        neigh_indexs = (neigh_indexs + idx_base).view(-1) # bsize*num_pts*spiral_size
+        feats = x.permute(0, 2, 1).contiguous().view(bsize*num_pts, num_feat)
+        feats = feats[neigh_indexs,:].view(bsize*num_pts, self.k, num_feat)
         
         #### relative position ####
-        x_repeat = spirals[:, 0:1, :].expand_as(spirals)
-        x_relative = spirals - x_repeat
+        x_repeat = feats[:, 0:1, :].expand_as(feats)
+        x_relative = feats - x_repeat
         x_dis = torch.norm(x_relative, dim=-1, keepdim=True)
         x_feats = torch.cat([x_repeat, x_relative, x_dis], dim=-1).view(bsize*num_pts, -1)
         x_feats = 2.*math.pi*x_feats @ self.B
         x_feats = torch.cat([torch.sin(x_feats), torch.cos(x_feats)], dim=-1)
         x_feats = self.softmax(self.mlp(x_feats))
         permatrix = torch.einsum('bi, ikt->bkt', x_feats, self.permatrix)
-        return spirals_index, permatrix #, F.gelu(out_feat)
+        return neigh_indexs, permatrix #, F.gelu(out_feat)
 
 class PaiConv(nn.Module):
     def __init__(self, in_c, out_c, k, kernel_size=20, bias=True): # ,device=None):
@@ -312,20 +304,20 @@ class PaiConv(nn.Module):
         self.conv = nn.Linear(in_c*self.kernel_size,out_c,bias=bias)
         self.bn = nn.BatchNorm1d(out_c)
 
-    def forward(self, feature, spirals_index, permatrix):
-        bsize, feats, num_pts = feature.size()
-        feature = feature.permute(0, 2, 1).contiguous().view(bsize*num_pts, feats)
+    def forward(self, feature, neigh_indexs, permatrix):
+        bsize, num_feat, num_pts = feature.size()
+        feature = feature.permute(0, 2, 1).contiguous().view(bsize*num_pts, num_feat)
         
-        spirals = feature[spirals_index,:].view(bsize*num_pts, self.k, feats)
-        spirals = spirals.permute(0, 2, 1).contiguous()
+        feats = feature[neigh_indexs,:].view(bsize*num_pts, self.k, num_feat)
+        feats = feats.permute(0, 2, 1).contiguous()
         
         # x_feat = self.mlp(x_feat.permute(0, 2, 1).contiguous())
-        # spirals = torch.cat([x_feat, spirals], dim=1)
+        # feats = torch.cat([x_feat, feats], dim=1)
         
-        spirals = torch.matmul(spirals, permatrix)
-        spirals = spirals.view(bsize*num_pts, feats*self.kernel_size)
+        feats = torch.matmul(feats, permatrix)
+        feats = feats.view(bsize*num_pts, num_feat*self.kernel_size)
 
-        out_feat = self.conv(spirals).view(bsize,num_pts,self.out_c)  
+        out_feat = self.conv(feats).view(bsize,num_pts,self.out_c)  
         out_feat = self.bn(out_feat.permute(0, 2, 1).contiguous())      
         return out_feat
 
@@ -336,19 +328,18 @@ class PaiConvDG(nn.Module):
         self.kernel_size = kernel_size
         self.in_c = in_c
         self.out_c = out_c
-        # self.mlp = nn.Conv1d(7, in_c, kernel_size=1, bias=False)
         self.conv = nn.Conv2d(in_c*2, out_c, kernel_size=1, bias=bias)
         self.bn = nn.BatchNorm1d(out_c)
 
-    def forward(self, feature, spirals_index, permatrix):
-        bsize, feats, num_pts = feature.size()
-        feature = feature.permute(0, 2, 1).contiguous().view(bsize*num_pts, feats)
+    def forward(self, feature, neigh_indexs, permatrix):
+        bsize, num_feat, num_pts = feature.size()
+        feature = feature.permute(0, 2, 1).contiguous().view(bsize*num_pts, num_feat)
         
-        spirals = feature[spirals_index,:].view(bsize*num_pts, self.k, feats)
-        spirals = spirals.permute(0, 2, 1).contiguous()
+        feats = feature[neigh_indexs,:].view(bsize*num_pts, self.k, num_feat)
+        feats = feats.permute(0, 2, 1).contiguous()
 
-        spirals = torch.matmul(spirals, permatrix)
-        feature = spirals.view(bsize, num_pts, self.k, -1)
+        feats = torch.matmul(feats, permatrix)
+        feature = feats.view(bsize, num_pts, self.k, -1)
         feature = self.conv(feature.permute(0, 3, 1, 2).contiguous())
         out_feat = self.bn(torch.max(feature, dim=-1)[0])
         return out_feat
@@ -380,7 +371,7 @@ class PaiNet(nn.Module):
         # self.transform_net = Transform_Net(args)
 
     def forward(self, x):
-        batch_size, feats, num_pts = x.size()
+        batch_size, num_feat, num_pts = x.size()
 
         # x0 = get_graph_feature(x, k=self.k)     # (batch_size, 3, num_points) -> (batch_size, 3*2, num_points, k)
         # t = self.transform_net(x0)              # (batch_size, 3, 3)
@@ -388,18 +379,18 @@ class PaiNet(nn.Module):
         # x = torch.bmm(x, t)                     # (batch_size, num_points, 3) * (batch_size, 3, 3) -> (batch_size, num_points, 3)
         # x = x.transpose(2, 1) 
 
-        spirals_index, permatrix = self.paiIdxMatrix(x) 
+        neigh_indexs, permatrix = self.paiIdxMatrix(x) 
         
-        feature = F.gelu(self.conv1(x, spirals_index, permatrix))
+        feature = F.gelu(self.conv1(x, neigh_indexs, permatrix))
         x1 = feature.clone()
 
-        feature = F.gelu(self.conv2(feature, spirals_index, permatrix))
+        feature = F.gelu(self.conv2(feature, neigh_indexs, permatrix))
         x2 = feature.clone()
         
-        feature = F.gelu(self.conv3(feature, spirals_index, permatrix))
+        feature = F.gelu(self.conv3(feature, neigh_indexs, permatrix))
         x3 = feature.clone()
 
-        feature = F.gelu(self.conv4(feature, spirals_index, permatrix))
+        feature = F.gelu(self.conv4(feature, neigh_indexs, permatrix))
         x4 = feature.clone()
 
         x = torch.cat((x1, x2, x3, x4), dim=1)

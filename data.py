@@ -16,6 +16,7 @@ import numpy as np
 from torch.utils.data import Dataset
 import open3d as o3d
 import time
+import torch
 
 def download():
     BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -84,6 +85,44 @@ class ModelNet40(Dataset):
     def __len__(self):
         return self.data.shape[0]
 
+def translate_pointcloud_tensor(pointcloud): #, center):
+    xyz1 = torch.empty(3).uniform_(2./3., 3./2.)
+    xyz2 = torch.empty(3).uniform_(-0.2, 0.2)
+    translated_pointcloud = pointcloud*xyz1 + xyz2
+    # center = [sub_center*xyz1 + xyz2 for sub_center in center]
+    return translated_pointcloud # , center
+
+def jitter_pointcloud_tensor(pointcloud, sigma=0.01, clip=0.02):
+    N, C = pointcloud.shape
+    pointcloud += torch.clamp(sigma * torch.randn(N, C), -1*clip, clip)
+    return pointcloud
+
+def point_loader_train(input):
+    #data = np.loadtxt(input, delimiter=',', dtype=np.float32)
+
+    mesh = torch.load(input)
+    data = mesh['data']
+    # data, center = mesh['data'], mesh['center']
+    # data = data - (torch.max(data, 0)[0] + torch.min(data, 0)[0]) / 2.
+    # data = 2 * data / (torch.max(data) - torch.min(data))
+    #noise = torch.empty_like(data).normal_(0, 0.001)
+    #data = data + noise
+
+    pointcloud = data[torch.randperm(data.shape[0])[:8196]]
+    pointcloud = translate_pointcloud_tensor(pointcloud)
+    pointcloud = jitter_pointcloud_tensor(pointcloud)
+    # np.random.shuffle(pointcloud)
+
+    return pointcloud
+
+def point_loader_test(input):
+    #data = np.loadtxt(input, delimiter=',', dtype=np.float32)
+
+    mesh = torch.load(input)
+    data = mesh['data']
+    # pointcloud = data[:8196]
+    pointcloud = data[torch.randperm(data.shape[0])[:8196]]
+    return pointcloud
 
 if __name__ == '__main__':
     train = ModelNet40(512)

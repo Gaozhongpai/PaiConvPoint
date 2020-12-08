@@ -199,13 +199,16 @@ class PaiConv(nn.Module):
         self.out_c = out_c
         self.dilation = dilation
         self.map_size = 32
+        self.group = 4
         self.B = nn.Parameter(torch.randn(7, self.map_size) , requires_grad=False)  
         self.kernels = nn.Parameter(torch.tensor(fibonacci_sphere(self.num_neighbor)).transpose(0, 1), requires_grad=False)
         self.one_padding = nn.Parameter(torch.zeros(self.num_neighbor, self.num_neighbor), requires_grad=False)
         self.one_padding.data[0, 0] = 1
-        self.mlp = nn.Conv1d(self.map_size*2, in_c, kernel_size=1, bias=bias)
-        self.conv = nn.Linear(2*in_c*self.num_neighbor, out_c,bias=bias)
-        self.group = 4
+ 
+        self.in_c_x = in_c // 2 if in_c > 3 else in_c
+        self.mlp = nn.Conv1d(self.map_size*2, self.in_c_x, kernel_size=1, bias=bias)
+        self.conv = nn.Linear((in_c+self.in_c_x)*self.num_neighbor, out_c,bias=bias)
+        
         # self.mlp_out = nn.Conv1d(in_c, out_c, kernel_size=1, bias=bias)
         self.bn = nn.BatchNorm1d(out_c)
 
@@ -238,16 +241,17 @@ class PaiConv(nn.Module):
         feats = feats[neigh_index,:].view(bsize*num_pts, self.num_neighbor, num_feat)
         feats = feats.permute(0, 2, 1).contiguous()
         feats = torch.cat([feats, x_feats], dim=1)
+        num_feat = num_feat + self.in_c_x
         
         permatrix = torch.matmul(x_relative, self.kernels)
         permatrix = (permatrix + self.one_padding) #
         permatrix = torch.where(permatrix > 0, permatrix, torch.full_like(permatrix, 0.))  # permatrix[permatrix < 0] = torch.min(permatrix)*5
         permatrix = self.topkmax(permatrix)
 
-        if num_feat > 3: ## channel shuffle
-            feats = feats.view(bsize*num_pts,self.group, 2*num_feat//self.group,-1).permute(0,2,1,3).reshape(bsize*num_pts, 2*num_feat,-1)
+        if num_feat > 2*3: ## channel shuffle
+            feats = feats.view(bsize*num_pts,self.group, num_feat//self.group,-1).permute(0,2,1,3).reshape(bsize*num_pts, num_feat,-1)
         feats = torch.matmul(feats, permatrix) 
-        feats = feats.view(bsize*num_pts, 2*num_feat*self.num_neighbor)
+        feats = feats.view(bsize*num_pts, num_feat*self.num_neighbor)
         out_feat = self.conv(feats).view(bsize,num_pts,self.out_c)  
         
         out_feat = out_feat.permute(0, 2, 1).contiguous() # + self.mlp_out(feature)

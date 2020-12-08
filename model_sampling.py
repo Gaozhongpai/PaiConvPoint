@@ -199,11 +199,16 @@ class PaiConv(nn.Module):
         self.out_c = out_c
         self.knn = knn3(self.k)
         self.kernels = kernels
+
+        self.map_size = 32
+        self.group = 4
+        self.B = nn.Parameter(torch.randn(7, self.map_size) , requires_grad=False)
         self.one_padding = nn.Parameter(torch.zeros(self.k, self.num_neighbor), requires_grad=False)
         self.one_padding.data[0, 0] = 1
-        self.mlp = nn.Conv1d(7, in_c, kernel_size=1, bias=bias)
-        self.conv = nn.Linear(2*in_c*self.num_neighbor, out_c,bias=bias)
-        self.mlp_out = nn.Conv1d(in_c, out_c, kernel_size=1, bias=bias)
+
+        self.in_c_x = in_c // 2 if in_c > 3 else in_c
+        self.mlp = nn.Conv1d(self.map_size*2, self.in_c_x, kernel_size=1, bias=bias)
+        self.conv = nn.Linear((in_c+self.in_c_x)*self.num_neighbor, out_c,bias=bias)
         self.bn = nn.BatchNorm1d(out_c)
 
     def topkmax(self, permatrix):
@@ -227,24 +232,28 @@ class PaiConv(nn.Module):
         x_repeat = x_neighs[:, 0:1, :].expand_as(x_neighs)
         x_relative = x_neighs - x_repeat
         x_dis = torch.norm(x_relative, dim=-1, keepdim=True)
-        x_feats = torch.cat([x_repeat, x_relative, x_dis], dim=-1)
+        x_feats = 2.*math.pi*torch.cat([x_repeat, x_relative, x_dis], dim=-1) @ self.B
+        x_feats = torch.cat([torch.sin(x_feats), torch.cos(x_feats)], dim=-1)
         x_feats = self.mlp(x_feats.permute(0, 2, 1).contiguous())
 
         feats = feature.permute(0, 2, 1).contiguous().view(bsize*num_pts, num_feat)
         feats = feats[neigh_index,:].view(bsize*num_pts, self.num_neighbor, num_feat)
         feats = feats.permute(0, 2, 1).contiguous()
         feats = torch.cat([feats, x_feats], dim=1)
-        
+        num_feat = num_feat + self.in_c_x
+
         permatrix = torch.matmul(x_relative, self.kernels)
         permatrix = (permatrix + self.one_padding) #
         permatrix = torch.where(permatrix > 0, permatrix, torch.full_like(permatrix, 0.))  
         permatrix = self.topkmax(permatrix)
 
+        if num_feat > 2*3: ## channel shuffle
+            feats = feats.view(bsize*num_pts,self.group, num_feat//self.group,-1).permute(0,2,1,3).reshape(bsize*num_pts, num_feat,-1)
         feats = torch.matmul(feats, permatrix) 
-        feats = feats.view(bsize*num_pts, 2*num_feat*self.num_neighbor)
+        feats = feats.view(bsize*num_pts, num_feat*self.num_neighbor)
         out_feat = self.conv(feats).view(bsize,num_pts,self.out_c)  
         
-        out_feat = out_feat.permute(0, 2, 1).contiguous() + self.mlp_out(feature)
+        out_feat = out_feat.permute(0, 2, 1).contiguous()
         return out_feat
 
 
@@ -307,17 +316,18 @@ class PaiNet(nn.Module):
         
         feature = F.gelu(self.conv1(x, x))
         x, feature = self.pooling(x, feature, num_pts // 4)
-        x1 = feature[:, :, :num_pts // 16]
+        x1 = feature[:, :, :num_pts // 64]
 
         feature = F.gelu(self.conv2(x, feature))
-        x, feature = self.pooling(x, feature, num_pts // 8)
-        x2 = feature[:, :, :num_pts // 16]
+        x, feature = self.pooling(x, feature, num_pts // 16)
+        x2 = feature[:, :, :num_pts // 64]
         
         feature = F.gelu(self.conv3(x, feature))
-        x, feature = self.pooling(x, feature, num_pts // 16)
-        x3 = feature[:, :, :num_pts // 16]
+        x, feature = self.pooling(x, feature, num_pts // 32)
+        x3 = feature[:, :, :num_pts // 64]
 
-        x4 = F.gelu(self.conv4(x, feature))
+        feature = F.gelu(self.conv4(x, feature))
+        _, x4 = self.pooling(x, feature, num_pts // 64)
 
         x = torch.cat((x1, x2, x3, x4), dim=1)
         x = F.gelu(self.conv5(x))
