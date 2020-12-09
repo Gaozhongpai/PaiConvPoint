@@ -44,19 +44,19 @@ class Transform_Net(nn.Module):
         return matrix
 
     def forward(self, x):
-        batch_size = x.size(0)
+        bsize = x.size(0)
 
-        x = self.conv1(x)                       # (batch_size, 3*2, num_points, k) -> (batch_size, 64, num_points, k)
-        x = self.conv2(x)                       # (batch_size, 64, num_points, k) -> (batch_size, 128, num_points, k)
-        x = x.max(dim=-1, keepdim=False)[0]     # (batch_size, 128, num_points, k) -> (batch_size, 128, num_points)
+        x = self.conv1(x)                       # (bsize, 3*2, num_points, k) -> (bsize, 64, num_points, k)
+        x = self.conv2(x)                       # (bsize, 64, num_points, k) -> (bsize, 128, num_points, k)
+        x = x.max(dim=-1, keepdim=False)[0]     # (bsize, 128, num_points, k) -> (bsize, 128, num_points)
 
-        x = self.conv3(x)                       # (batch_size, 128, num_points) -> (batch_size, 1024, num_points)
-        x = x.max(dim=-1, keepdim=False)[0]     # (batch_size, 1024, num_points) -> (batch_size, 1024)
+        x = self.conv3(x)                       # (bsize, 128, num_points) -> (bsize, 1024, num_points)
+        x = x.max(dim=-1, keepdim=False)[0]     # (bsize, 1024, num_points) -> (bsize, 1024)
 
-        x = F.leaky_relu(self.bn3(self.linear1(x)), negative_slope=0.2)     # (batch_size, 1024) -> (batch_size, 512)
-        x = F.leaky_relu(self.bn4(self.linear2(x)), negative_slope=0.2)     # (batch_size, 512) -> (batch_size, 256)
+        x = F.leaky_relu(self.bn3(self.linear1(x)), negative_slope=0.2)     # (bsize, 1024) -> (bsize, 512)
+        x = F.leaky_relu(self.bn4(self.linear2(x)), negative_slope=0.2)     # (bsize, 512) -> (bsize, 256)
 
-        x = self.transform(x)                   # (batch_size, 256) -> (batch_size, 3*3)
+        x = self.transform(x)                   # (bsize, 256) -> (bsize, 3*3)
         x = self.compute_rotation_matrix_from_ortho6d(x)
         return x
 
@@ -71,30 +71,30 @@ class TemperatureNet(nn.Module):
         self.linear = nn.Linear(64, 1)
                                 
     def forward(self, input):
-        batch_size = input.shape[0]
+        bsize = input.shape[0]
         x = input.permute(0, 2, 1).contiguous()
         x = self.nn(x)
-        x = F.adaptive_max_pool1d(x, 1).view(batch_size, -1)
+        x = F.adaptive_max_pool1d(x, 1).view(bsize, -1)
         x = torch.sigmoid(self.linear(x)[:, :, None])*(0.1 - 1.0/self.temp_factor) + 1.0/self.temp_factor
         return x
 
 def get_graph_feature(x, k=20, idx=None):
-    batch_size = x.size(0)
+    bsize = x.size(0)
     num_points = x.size(2)
-    x = x.view(batch_size, -1, num_points)
+    x = x.view(bsize, -1, num_points)
     if idx is None:
-        idx = knn(x, k=k)   # (batch_size, num_points, k)
+        idx = knn(x, k=k)   # (bsize, num_points, k)
     device = torch.device('cuda')
 
-    idx_base = torch.arange(0, batch_size, device=device).view(-1, 1, 1)*num_points
+    idx_base = torch.arange(0, bsize, device=device).view(-1, 1, 1)*num_points
     idx = idx + idx_base
     idx = idx.view(-1)
     _, num_dims, _ = x.size()
 
-    x = x.transpose(2, 1).contiguous()   # (batch_size, num_points, num_dims)  -> (batch_size*num_points, num_dims) #   batch_size * num_points * k + range(0, batch_size*num_points)
-    feature = x.view(batch_size*num_points, -1)[idx, :]
-    feature = feature.view(batch_size, num_points, k, num_dims) 
-    x = x.view(batch_size, num_points, 1, num_dims).repeat(1, 1, k, 1)
+    x = x.transpose(2, 1).contiguous()   # (bsize, num_points, num_dims)  -> (bsize*num_points, num_dims) #   bsize * num_points * k + range(0, bsize*num_points)
+    feature = x.view(bsize*num_points, -1)[idx, :]
+    feature = feature.view(bsize, num_points, k, num_dims) 
+    x = x.view(bsize, num_points, 1, num_dims).repeat(1, 1, k, 1)
     
     feature = torch.cat((feature-x, x), dim=3).permute(0, 3, 1, 2).contiguous()
   

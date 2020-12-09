@@ -110,7 +110,6 @@ class PaiNet(nn.Module):
         self.num_layers = 4
         self.knn = knn3(self.k)
 
-        self.bn5 = nn.BatchNorm1d(args.emb_dims)
         self.activation = nn.LeakyReLU(negative_slope=0.2)
 
         self.conv1 = PaiConv(3, 64, self.k, num_kernel, 1)
@@ -119,6 +118,7 @@ class PaiNet(nn.Module):
         self.conv4 = PaiConv(128, 256, self.k, num_kernel, 4)
         self.conv5 = nn.Sequential(nn.Conv1d(512, args.emb_dims, kernel_size=1, bias=False),
                                    self.bn5)
+        self.bn5 = nn.BatchNorm1d(args.emb_dims)
         self.linear1 = nn.Linear(args.emb_dims*2, 512, bias=False)
         self.bn6 = nn.BatchNorm1d(512)
         self.dp1 = nn.Dropout(p=args.dropout)
@@ -129,13 +129,14 @@ class PaiNet(nn.Module):
         # self.transform_net = Transform_Net(args)
 
     def forward(self, x):
-        batch_size, feats, num_pts = x.size()
+        bsize, feats, num_pts = x.size()
 
-        # x0 = get_graph_feature(x, k=self.k)     # (batch_size, 3, num_points) -> (batch_size, 3*2, num_points, k)
-        # t = self.transform_net(x0)              # (batch_size, 3, 3)
-        # x = x.transpose(2, 1)                   # (batch_size, 3, num_points) -> (batch_size, num_points, 3)
-        # x = torch.bmm(x, t)                     # (batch_size, num_points, 3) * (batch_size, 3, 3) -> (batch_size, num_points, 3)
+        # x0 = get_graph_feature(x, k=self.k)     # (bsize, 3, num_points) -> (bsize, 3*2, num_points, k)
+        # t = self.transform_net(x0)              # (bsize, 3, 3)
+        # x = x.transpose(2, 1)                   # (bsize, 3, num_points) -> (bsize, num_points, 3)
+        # x = torch.bmm(x, t)                     # (bsize, num_points, 3) * (bsize, 3, 3) -> (bsize, num_points, 3)
         # x = x.transpose(2, 1) 
+        
         x_temp = x.permute(0, 2, 1).contiguous()
         neigh_indexs = self.knn(x_temp, x_temp)
         
@@ -153,8 +154,8 @@ class PaiNet(nn.Module):
 
         x = torch.cat((x1, x2, x3, x4), dim=1)
         x = F.gelu(self.conv5(x))
-        x1 = F.adaptive_max_pool1d(x, 1).view(batch_size, -1)
-        x2 = F.adaptive_avg_pool1d(x, 1).view(batch_size, -1)
+        x1 = F.adaptive_max_pool1d(x, 1).view(bsize, -1)
+        x2 = F.adaptive_avg_pool1d(x, 1).view(bsize, -1)
         x = torch.cat((x1, x2), 1)
 
         x = F.gelu(self.bn6(self.linear1(x)))
@@ -201,7 +202,7 @@ class DGCNN(nn.Module):
         self.linear3 = nn.Linear(256, output_channels)
 
     def forward(self, x):
-        batch_size = x.size(0)
+        bsize = x.size(0)
         x = get_graph_feature(x, k=self.k)
         x = self.conv1(x)
         x1 = x.max(dim=-1, keepdim=False)[0]
@@ -221,8 +222,8 @@ class DGCNN(nn.Module):
         x = torch.cat((x1, x2, x3, x4), dim=1)
 
         x = self.conv5(x)
-        x1 = F.adaptive_max_pool1d(x, 1).view(batch_size, -1)
-        x2 = F.adaptive_avg_pool1d(x, 1).view(batch_size, -1)
+        x1 = F.adaptive_max_pool1d(x, 1).view(bsize, -1)
+        x2 = F.adaptive_avg_pool1d(x, 1).view(bsize, -1)
         x = torch.cat((x1, x2), 1)
 
         x = F.leaky_relu(self.bn6(self.linear1(x)), negative_slope=0.2)
