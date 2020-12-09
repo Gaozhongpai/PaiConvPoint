@@ -7,6 +7,7 @@
 @Time: 2018/10/13 6:35 PM
 """
 
+from sparsemax import Sparsemax
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -70,6 +71,36 @@ class PaiConv(nn.Module):
         out_feat = self.bn(out_feat.permute(0, 2, 1).contiguous())      
         return out_feat
 
+class PaiConvISO(nn.Module):
+    def __init__(self, in_c, out_c, k, kernel_size=20, bias=True): # ,device=None):
+        super(PaiConvISO, self).__init__()
+        self.k = k
+        self.kernel_size = kernel_size
+        self.in_c = in_c
+        self.out_c = out_c
+        self.group = 4
+        self.conv = nn.Conv1d(in_c,out_c,kernel_size=1,bias=bias)
+        self.conv_out = nn.Conv1d(kernel_size,1,kernel_size=1,bias=bias)
+        self.bn = nn.BatchNorm1d(out_c)
+
+    def forward(self, feature, neigh_indexs, permatrix):
+        bsize, num_feat, num_pts = feature.size()
+        feature = feature.permute(0, 2, 1).contiguous().view(bsize*num_pts, num_feat)
+        
+        feats = feature[neigh_indexs,:].view(bsize*num_pts, self.k, num_feat)
+        feats = feats.permute(0, 2, 1).contiguous()
+        # x_feat = self.mlp(x_feat.permute(0, 2, 1).contiguous())
+        # feats = torch.cat([x_feat, feats], dim=1)
+        if num_feat > 3: ## channel shuffle
+            feats = feats.view(bsize*num_pts,self.group, num_feat//self.group,-1).permute(0,2,1,3).reshape(bsize*num_pts, num_feat,-1)
+        feats = torch.matmul(feats, permatrix)
+        feats = feats.view(bsize*num_pts, num_feat, self.kernel_size)
+
+        feats = torch.max(self.conv(feats), dim=-1)[0]
+        out_feat = feats.view(bsize,num_pts,self.out_c)
+        out_feat = self.bn(out_feat.permute(0, 2, 1).contiguous())      
+        return out_feat
+
 class PaiConvDG(nn.Module):
     def __init__(self, in_c, out_c, k, kernel_size=20, bias=True): # ,device=None):
         super(PaiConvDG, self).__init__()
@@ -105,21 +136,22 @@ class PaiNet(nn.Module):
         super(PaiNet, self).__init__()
         self.args = args
         self.k = args.k
-        num_kernel = args.k
+        num_kernel = 7 # xyz*2+1 # args.k
         
         self.kernels = nn.Parameter(torch.tensor(fibonacci_sphere(num_kernel)).transpose(0, 1), requires_grad=False)        
         self.one_padding = nn.Parameter(torch.zeros(self.k, num_kernel), requires_grad=False)
         self.one_padding.data[0, 0] = 1
-        self.bn5 = nn.BatchNorm1d(args.emb_dims)
         self.activation = nn.LeakyReLU(negative_slope=0.2)
+        self.softmax = Sparsemax(dim=-1)
 
         self.conv1 = PaiConv(3, 64, self.k, num_kernel)
         self.conv2 = PaiConv(64, 64, self.k, num_kernel)
         self.conv3 = PaiConv(64, 128, self.k, num_kernel)
         self.conv4 = PaiConv(128, 256, self.k, num_kernel)
+
+        self.bn5 = nn.BatchNorm1d(args.emb_dims)
         self.conv5 = nn.Sequential(nn.Conv1d(512, args.emb_dims, kernel_size=1, bias=False),
                                    self.bn5)
-        
         self.linear1 = nn.Linear(args.emb_dims*2, 512, bias=False)
         self.bn6 = nn.BatchNorm1d(512)
         self.dp1 = nn.Dropout(p=args.dropout)
@@ -142,7 +174,7 @@ class PaiNet(nn.Module):
         permatrix = torch.matmul(x_relative, self.kernels)
         permatrix = (permatrix + self.one_padding) #
         permatrix = torch.where(permatrix > 0, permatrix, torch.full_like(permatrix, 0.))  # permatrix[permatrix < 0] = torch.min(permatrix)*5
-        permatrix = topkmax(permatrix)
+        permatrix = topkmax(permatrix) # self.softmax(permatrix.permute(0, 2, 1).contiguous()).permute(0, 2, 1).contiguous() # 
         return neigh_indexs, permatrix
 
     def forward(self, x):

@@ -116,9 +116,10 @@ class PaiNet(nn.Module):
         self.conv2 = PaiConv(64, 64, self.kernals, self.k, num_kernel)
         self.conv3 = PaiConv(64, 128, self.kernals, self.k, num_kernel)
         self.conv4 = PaiConv(128, 256, self.kernals, self.k, num_kernel)
+
+        self.bn5 = nn.BatchNorm1d(args.emb_dims)
         self.conv5 = nn.Sequential(nn.Conv1d(512, args.emb_dims, kernel_size=1, bias=False),
                                    self.bn5)
-        self.bn5 = nn.BatchNorm1d(args.emb_dims)
         self.linear1 = nn.Linear(args.emb_dims*2, 512, bias=False)
         self.bn6 = nn.BatchNorm1d(512)
         self.dp1 = nn.Dropout(p=args.dropout)

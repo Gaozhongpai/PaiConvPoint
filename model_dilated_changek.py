@@ -106,8 +106,7 @@ class PaiNet(nn.Module):
         super(PaiNet, self).__init__()
         self.args = args
         self.k = args.k
-        num_kernel = args.k
-        self.num_layers = 4
+        num_kernel = 7
         self.knn = knn3(self.k)
 
         self.activation = nn.LeakyReLU(negative_slope=0.2)
@@ -116,9 +115,10 @@ class PaiNet(nn.Module):
         self.conv2 = PaiConv(64, 64, self.k, num_kernel, 2)
         self.conv3 = PaiConv(64, 128, self.k, num_kernel, 3)
         self.conv4 = PaiConv(128, 256, self.k, num_kernel, 4)
+
+        self.bn5 = nn.BatchNorm1d(args.emb_dims)
         self.conv5 = nn.Sequential(nn.Conv1d(512, args.emb_dims, kernel_size=1, bias=False),
                                    self.bn5)
-        self.bn5 = nn.BatchNorm1d(args.emb_dims)
         self.linear1 = nn.Linear(args.emb_dims*2, 512, bias=False)
         self.bn6 = nn.BatchNorm1d(512)
         self.dp1 = nn.Dropout(p=args.dropout)

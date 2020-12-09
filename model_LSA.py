@@ -51,7 +51,7 @@ class PaiConv(nn.Module):
         self.out_c = out_c
         self.group = 4
         
-        self.conv = nn.Linear(in_c,out_c,bias=bias)
+        self.conv = nn.Linear(in_c*self.kernel_size,out_c,bias=bias)
         self.bn = nn.BatchNorm1d(out_c)
 
     def forward(self, feature, neigh_indexs, permatrix):
@@ -76,24 +76,27 @@ class PaiNet(nn.Module):
         super(PaiNet, self).__init__()
         self.args = args
         self.k = args.k
-        num_kernel = args.k
+        num_kernel = 7 # xyz*3 + 1
         self.activation = nn.LeakyReLU(negative_slope=0.2)
 
         map_size = 32
         num_bases = 16
         self.B = nn.Parameter(torch.randn(7*self.k, map_size) , requires_grad=False) 
         self.mlp = nn.Linear(map_size*2, num_bases, bias=False)
-        self.permatrix = nn.Parameter(torch.randn(num_bases, num_kernel, num_kernel), requires_grad=True)
-        self.permatrix.data = torch.eye(num_kernel).unsqueeze(0).expand_as(self.permatrix) 
-        self.softmax = Sparsemax(dim=-1) #
+        self.permatrix = nn.Parameter(torch.randn(num_bases, self.k, num_kernel), requires_grad=True)
+        self.permatrix.data = torch.cat([torch.eye(num_kernel), torch.zeros(self.k-num_kernel, num_kernel)], 
+                                        dim=0).unsqueeze(0).expand_as(self.permatrix) 
+        self.softmax = Sparsemax(dim=-1) 
 
         self.conv1 = PaiConv(3, 64, self.k, num_kernel)
         self.conv2 = PaiConv(64, 64, self.k, num_kernel)
         self.conv3 = PaiConv(64, 128, self.k, num_kernel)
         self.conv4 = PaiConv(128, 256, self.k, num_kernel)
+
+        self.bn5 = nn.BatchNorm1d(args.emb_dims)
         self.conv5 = nn.Sequential(nn.Conv1d(512, args.emb_dims, kernel_size=1, bias=False),
                                    self.bn5)
-        self.bn5 = nn.BatchNorm1d(args.emb_dims)
+        
         self.linear1 = nn.Linear(args.emb_dims*2, 512, bias=False)
         self.bn6 = nn.BatchNorm1d(512)
         self.dp1 = nn.Dropout(p=args.dropout)
@@ -102,7 +105,7 @@ class PaiNet(nn.Module):
         self.dp2 = nn.Dropout(p=args.dropout)
         self.linear3 = nn.Linear(256, output_channels)
 
-    def permatrix_lsa(self, neigh_indexs, x):
+    def permatrix_lsa(self, x):
         bsize, num_feat, num_pts = x.size()
 
         neigh_indexs = knn(x, self.k)

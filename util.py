@@ -20,6 +20,7 @@ def topkmax(permatrix):
     permatrix = permatrix * permatrix
     permatrix = permatrix / (torch.sum(permatrix, dim=1, keepdim=True) + 1e-6)
     permatrix = torch.where(permatrix > 0.1, permatrix, torch.full_like(permatrix, 0.)) 
+    permatrix = permatrix / (torch.sum(permatrix, dim=1, keepdim=True) + 1e-6)
     return permatrix
 
 def knn3(K=20):
