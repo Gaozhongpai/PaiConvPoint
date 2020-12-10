@@ -90,8 +90,8 @@ class PaiConv(nn.Module):
         permatrix = (permatrix + self.one_padding) #
         permatrix = topkmax(permatrix)
 
-        if num_feat > 2*3: ## channel shuffle
-            feats = feats.view(bsize*num_pts,self.group, num_feat//self.group,-1).permute(0,2,1,3).reshape(bsize*num_pts, num_feat,-1)
+        # if num_feat > 2*3: ## channel shuffle
+        #     feats = feats.view(bsize*num_pts,self.group, num_feat//self.group,-1).permute(0,2,1,3).reshape(bsize*num_pts, num_feat,-1)
         feats = torch.matmul(feats, permatrix) 
         feats = feats.view(bsize*num_pts, num_feat*self.num_neighbor)
         out_feat = self.conv(feats).view(bsize,num_pts,self.out_c)  

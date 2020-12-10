@@ -12,63 +12,9 @@ import torch.nn as nn
 import torch.nn.functional as F
 from sparsemax import Sparsemax
 from sinkhorn import Sinkhorn
-from util import fibonacci_sphere, knn, topkmax
-from networks import get_graph_feature
+from util import knn
 import math
-
-class RandLANet(nn.Module):
-    def __init__(self, in_c, out_c, k, kernel_size=20, bias=True): # ,device=None):
-        super(RandLANet, self).__init__()
-        self.k = k
-        self.kernel_size = kernel_size
-        self.in_c = in_c
-        self.out_c = out_c
-        self.mlp = nn.Conv1d(in_c, in_c, kernel_size=1, bias=False)
-        self.conv = nn.Linear(in_c,out_c,bias=bias)
-        self.bn = nn.BatchNorm1d(out_c)
-        self.softmax = nn.Softmax(dim=1)
-
-    def forward(self, feature, neigh_indexs, permatrix):
-        bsize, num_feat, num_pts = feature.size()
-        feature = feature.permute(0, 2, 1).contiguous().view(bsize*num_pts, num_feat)
-        
-        feats = feature[neigh_indexs,:].view(bsize*num_pts, self.k, num_feat)
-        feats = feats.permute(0, 2, 1).contiguous()
-        
-        feats = torch.sum(self.softmax(self.mlp(feats))*feats, dim=-1) ## This is for RandLA-Net
-        feats = feats.view(bsize*num_pts, num_feat)
-
-        out_feat = self.conv(feats).view(bsize,num_pts,self.out_c)  
-        out_feat = self.bn(out_feat.permute(0, 2, 1).contiguous())      
-        return out_feat
-
-class PaiConv(nn.Module):
-    def __init__(self, in_c, out_c, k, kernel_size=20, bias=True): # ,device=None):
-        super(PaiConv, self).__init__()
-        self.k = k
-        self.kernel_size = kernel_size
-        self.in_c = in_c
-        self.out_c = out_c
-        self.group = 4
-        
-        self.conv = nn.Linear(in_c*self.kernel_size,out_c,bias=bias)
-        self.bn = nn.BatchNorm1d(out_c)
-
-    def forward(self, feature, neigh_indexs, permatrix):
-        bsize, num_feat, num_pts = feature.size()
-        feature = feature.permute(0, 2, 1).contiguous().view(bsize*num_pts, num_feat)
-        
-        feats = feature[neigh_indexs,:].view(bsize*num_pts, self.k, num_feat)
-        feats = feats.permute(0, 2, 1).contiguous()
-        
-        if num_feat > 3: ## channel shuffle
-            feats = feats.view(bsize*num_pts,self.group, num_feat//self.group,-1).permute(0,2,1,3).reshape(bsize*num_pts, num_feat,-1)
-        feats = torch.matmul(feats, permatrix)
-        feats = feats.view(bsize*num_pts, num_feat*self.kernel_size)
-
-        out_feat = self.conv(feats).view(bsize, num_pts, self.out_c)
-        out_feat = self.bn(out_feat.permute(0, 2, 1).contiguous())      
-        return out_feat
+from model import PaiConv
 
 
 class PaiNet(nn.Module):
@@ -76,7 +22,7 @@ class PaiNet(nn.Module):
         super(PaiNet, self).__init__()
         self.args = args
         self.k = args.k
-        num_kernel = 7 # xyz*3 + 1
+        num_kernel = 9 # xyz*3 + 1
         self.activation = nn.LeakyReLU(negative_slope=0.2)
 
         map_size = 32
@@ -134,7 +80,6 @@ class PaiNet(nn.Module):
         # x = x.transpose(2, 1)                   # (bsize, 3, num_points) -> (bsize, num_points, 3)
         # x = torch.bmm(x, t)                     # (bsize, num_points, 3) * (bsize, 3, 3) -> (bsize, num_points, 3)
         # x = x.transpose(2, 1) 
-
         
         neigh_indexs, permatrix = self.permatrix_lsa(x)
         
@@ -159,115 +104,6 @@ class PaiNet(nn.Module):
         x = F.gelu(self.bn6(self.linear1(x)))
         x = self.dp1(x)
         x = F.gelu(self.bn7(self.linear2(x)))
-        x = self.dp2(x)
-        x = self.linear3(x)
-        return x
-
-
-class DGCNN(nn.Module):
-    def __init__(self, args, output_channels=40):
-        super(DGCNN, self).__init__()
-        self.args = args
-        self.k = args.k
-        
-        self.bn1 = nn.BatchNorm2d(64)
-        self.bn2 = nn.BatchNorm2d(64)
-        self.bn3 = nn.BatchNorm2d(128)
-        self.bn4 = nn.BatchNorm2d(256)
-        self.bn5 = nn.BatchNorm1d(args.emb_dims)
-
-        self.conv1 = nn.Sequential(nn.Conv2d(6, 64, kernel_size=1, bias=False),
-                                   self.bn1,
-                                   nn.LeakyReLU(negative_slope=0.2))
-        self.conv2 = nn.Sequential(nn.Conv2d(64*2, 64, kernel_size=1, bias=False),
-                                   self.bn2,
-                                   nn.LeakyReLU(negative_slope=0.2))
-        self.conv3 = nn.Sequential(nn.Conv2d(64*2, 128, kernel_size=1, bias=False),
-                                   self.bn3,
-                                   nn.LeakyReLU(negative_slope=0.2))
-        self.conv4 = nn.Sequential(nn.Conv2d(128*2, 256, kernel_size=1, bias=False),
-                                   self.bn4,
-                                   nn.LeakyReLU(negative_slope=0.2))
-        self.conv5 = nn.Sequential(nn.Conv1d(512, args.emb_dims, kernel_size=1, bias=False),
-                                   self.bn5,
-                                   nn.LeakyReLU(negative_slope=0.2))
-        self.linear1 = nn.Linear(args.emb_dims*2, 512, bias=False)
-        self.bn6 = nn.BatchNorm1d(512)
-        self.dp1 = nn.Dropout(p=args.dropout)
-        self.linear2 = nn.Linear(512, 256)
-        self.bn7 = nn.BatchNorm1d(256)
-        self.dp2 = nn.Dropout(p=args.dropout)
-        self.linear3 = nn.Linear(256, output_channels)
-
-    def forward(self, x):
-        bsize = x.size(0)
-        x = get_graph_feature(x, k=self.k)
-        x = self.conv1(x)
-        x1 = x.max(dim=-1, keepdim=False)[0]
-
-        x = get_graph_feature(x1, k=self.k)
-        x = self.conv2(x)
-        x2 = x.max(dim=-1, keepdim=False)[0]
-
-        x = get_graph_feature(x2, k=self.k)
-        x = self.conv3(x)
-        x3 = x.max(dim=-1, keepdim=False)[0]
-
-        x = get_graph_feature(x3, k=self.k)
-        x = self.conv4(x)
-        x4 = x.max(dim=-1, keepdim=False)[0]
-
-        x = torch.cat((x1, x2, x3, x4), dim=1)
-
-        x = self.conv5(x)
-        x1 = F.adaptive_max_pool1d(x, 1).view(bsize, -1)
-        x2 = F.adaptive_avg_pool1d(x, 1).view(bsize, -1)
-        x = torch.cat((x1, x2), 1)
-
-        x = F.leaky_relu(self.bn6(self.linear1(x)), negative_slope=0.2)
-        x = self.dp1(x)
-        x = F.leaky_relu(self.bn7(self.linear2(x)), negative_slope=0.2)
-        x = self.dp2(x)
-        x = self.linear3(x)
-        return x
-
-
-class PointNet(nn.Module):
-    def __init__(self, args, output_channels=40):
-        super(PointNet, self).__init__()
-        self.args = args
-        self.conv1 = nn.Conv1d(3, 64, kernel_size=1, bias=False)
-        self.conv2 = nn.Conv1d(64, 64, kernel_size=1, bias=False)
-        self.conv3 = nn.Conv1d(64, 64, kernel_size=1, bias=False)
-        self.conv4 = nn.Conv1d(64, 128, kernel_size=1, bias=False)
-        self.conv5 = nn.Conv1d(128, args.emb_dims, kernel_size=1, bias=False)
-        self.bn1 = nn.BatchNorm1d(64)
-        self.bn2 = nn.BatchNorm1d(64)
-        self.bn3 = nn.BatchNorm1d(64)
-        self.bn4 = nn.BatchNorm1d(128)
-        self.bn5 = nn.BatchNorm1d(args.emb_dims)
-
-        self.linear1 = nn.Linear(args.emb_dims*2, 512, bias=False)
-        self.bn6 = nn.BatchNorm1d(512)
-        self.dp1 = nn.Dropout(p=args.dropout)
-        self.linear2 = nn.Linear(512, 256)
-        self.bn7 = nn.BatchNorm1d(256)
-        self.dp2 = nn.Dropout(p=args.dropout)
-        self.linear3 = nn.Linear(256, output_channels)
-
-    def forward(self, x):
-        x = F.relu(self.bn1(self.conv1(x)))
-        x = F.relu(self.bn2(self.conv2(x)))
-        x = F.relu(self.bn3(self.conv3(x)))
-        x = F.relu(self.bn4(self.conv4(x)))
-        x = F.relu(self.bn5(self.conv5(x)))
-        x1 = F.adaptive_max_pool1d(x, 1).squeeze()
-        x2 = F.adaptive_avg_pool1d(x, 1).squeeze()
-        x = torch.cat((x1, x2), 1)
-
-        x = F.leaky_relu(self.bn6(self.linear1(x)), negative_slope=0.2)
-        x = self.dp1(x)
-        x = F.leaky_relu(self.bn7(self.linear2(x)), negative_slope=0.2)
         x = self.dp2(x)
         x = self.linear3(x)
         return x

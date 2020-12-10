@@ -62,8 +62,9 @@ class PaiConv(nn.Module):
         feats = feats.permute(0, 2, 1).contiguous()
         # x_feat = self.mlp(x_feat.permute(0, 2, 1).contiguous())
         # feats = torch.cat([x_feat, feats], dim=1)
-        if num_feat > 3: ## channel shuffle
-            feats = feats.view(bsize*num_pts,self.group, num_feat//self.group,-1).permute(0,2,1,3).reshape(bsize*num_pts, num_feat,-1)
+        
+        # if num_feat > 3: ## channel shuffle
+        #     feats = feats.view(bsize*num_pts,self.group, num_feat//self.group,-1).permute(0,2,1,3).reshape(bsize*num_pts, num_feat,-1)
         feats = torch.matmul(feats, permatrix)
 
         feats = feats.view(bsize*num_pts, num_feat*self.kernel_size)
@@ -80,7 +81,7 @@ class PaiConvMax(nn.Module):
         self.out_c = out_c
         self.group = 4
         self.conv1 = nn.Linear(in_c*self.kernel_size,out_c//2,bias=bias)
-        self.conv2 = nn.Conv1d(in_c,out_c//2,kernel_size=1,bias=bias)
+        self.conv2 = nn.Conv1d(in_c*2,out_c//2,kernel_size=1,bias=bias)
         self.bn = nn.BatchNorm1d(out_c)
 
     def forward(self, feature, neigh_indexs, permatrix):
@@ -91,13 +92,16 @@ class PaiConvMax(nn.Module):
         feats = feats.permute(0, 2, 1).contiguous()
         # x_feat = self.mlp(x_feat.permute(0, 2, 1).contiguous())
         # feats = torch.cat([x_feat, feats], dim=1)
-        if num_feat > 3: ## channel shuffle
-            feats = feats.view(bsize*num_pts,self.group, num_feat//self.group,-1).permute(0,2,1,3).reshape(bsize*num_pts, num_feat,-1)
+
+        # if num_feat > 3: ## channel shuffle
+        #     feats = feats.view(bsize*num_pts,self.group, num_feat//self.group,-1).permute(0,2,1,3).reshape(bsize*num_pts, num_feat,-1)
         feats = torch.matmul(feats, permatrix)
 
         feats = feats.view(bsize*num_pts, num_feat*self.kernel_size)
         out_feat1 = self.conv1(feats).view(bsize,num_pts,self.out_c//2)  
         feats = feats.view(bsize*num_pts, num_feat, self.kernel_size)
+        f_repeat =  feats[:, :, 0:1].expand_as(feats)
+        feats = torch.cat([f_repeat, feats - f_repeat], dim=1)
         out_feat2 = torch.max(self.conv2(feats), dim=-1)[0].view(bsize,num_pts,self.out_c//2)  
         out_feat = torch.cat([out_feat1, out_feat2], dim=-1)
         out_feat = self.bn(out_feat.permute(0, 2, 1).contiguous())      
@@ -126,8 +130,8 @@ class PaiConvDG(nn.Module):
         feats = torch.cat([f_repeat, f_relative], dim=1)
 
         num_feat = num_feat*2
-        if num_feat > 2*3: ## channel shuffle
-            feats = feats.view(bsize*num_pts,self.group, num_feat//self.group,-1).permute(0,2,1,3).reshape(bsize*num_pts, num_feat,-1)
+        # if num_feat > 2*3: ## channel shuffle
+        #     feats = feats.view(bsize*num_pts,self.group, num_feat//self.group,-1).permute(0,2,1,3).reshape(bsize*num_pts, num_feat,-1)
         feats = torch.matmul(feats, permatrix)
         feats = feats.view(bsize*num_pts, num_feat, self.kernel_size)
 
