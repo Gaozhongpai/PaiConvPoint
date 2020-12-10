@@ -35,8 +35,8 @@ class PaiConv(nn.Module):
         # x_feat = self.mlp(x_feat.permute(0, 2, 1).contiguous())
         # feats = torch.cat([x_feat, feats], dim=1)
         
-        # if num_feat > 3: ## channel shuffle
-        #     feats = feats.view(bsize*num_pts,self.group, num_feat//self.group,-1).permute(0,2,1,3).reshape(bsize*num_pts, num_feat,-1)
+        if num_feat > 3: ## channel shuffle
+            feats = feats.view(bsize*num_pts,self.group, num_feat//self.group,-1).permute(0,2,1,3).reshape(bsize*num_pts, num_feat,-1)
         feats = torch.matmul(feats, permatrix)
 
         feats = feats.view(bsize*num_pts, num_feat*self.kernel_size)
@@ -65,8 +65,8 @@ class PaiConvMax(nn.Module):
         # x_feat = self.mlp(x_feat.permute(0, 2, 1).contiguous())
         # feats = torch.cat([x_feat, feats], dim=1)
 
-        # if num_feat > 3: ## channel shuffle
-        #     feats = feats.view(bsize*num_pts,self.group, num_feat//self.group,-1).permute(0,2,1,3).reshape(bsize*num_pts, num_feat,-1)
+        if num_feat > 3: ## channel shuffle
+            feats = feats.view(bsize*num_pts,self.group, num_feat//self.group,-1).permute(0,2,1,3).reshape(bsize*num_pts, num_feat,-1)
         feats = torch.matmul(feats, permatrix)
 
         feats = feats.view(bsize*num_pts, num_feat*self.kernel_size)

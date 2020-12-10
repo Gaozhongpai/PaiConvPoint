@@ -18,7 +18,7 @@ import torch.optim as optim
 from torch.optim.lr_scheduler import CosineAnnealingLR
 from data import ModelNet40
 # from pai_model import PaiNet
-from model import PaiNet
+from model_sampling import PaiNet
 import numpy as np
 from torch.utils.data import DataLoader
 from util import cal_loss, IOStream
