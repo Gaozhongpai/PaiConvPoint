@@ -16,6 +16,7 @@ from pykeops.torch import generic_argkmin
 
 
 def topkmax(permatrix):
+    permatrix = torch.where(permatrix > 0, permatrix, torch.full_like(permatrix, 0.))  # permatrix[permatrix < 0] = torch.min(permatrix)*5
     permatrix = permatrix / (torch.sum(permatrix, dim=1, keepdim=True) + 1e-6)
     permatrix = permatrix * permatrix
     permatrix = permatrix / (torch.sum(permatrix, dim=1, keepdim=True) + 1e-6)

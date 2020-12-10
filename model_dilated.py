@@ -88,7 +88,6 @@ class PaiConv(nn.Module):
         
         permatrix = torch.matmul(x_relative, self.kernels)
         permatrix = (permatrix + self.one_padding) #
-        permatrix = torch.where(permatrix > 0, permatrix, torch.full_like(permatrix, 0.))  # permatrix[permatrix < 0] = torch.min(permatrix)*5
         permatrix = topkmax(permatrix)
 
         if num_feat > 2*3: ## channel shuffle
@@ -97,7 +96,7 @@ class PaiConv(nn.Module):
         feats = feats.view(bsize*num_pts, num_feat*self.num_neighbor)
         out_feat = self.conv(feats).view(bsize,num_pts,self.out_c)  
         
-        out_feat = out_feat.permute(0, 2, 1).contiguous() # + self.mlp_out(feature)
+        out_feat = self.bn(out_feat.permute(0, 2, 1).contiguous()) # + self.mlp_out(feature)
         return out_feat
 
 

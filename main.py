@@ -55,7 +55,8 @@ def train(args, io):
         model = PaiNet(args).to(device)
         #raise Exception("Not implemented")
     print(str(model))
-
+    params = sum(p.numel() for p in model.parameters() if p.requires_grad)
+    print("Total number of parameters is: {}".format(params))
     model = nn.DataParallel(model)
     print("Let's use", torch.cuda.device_count(), "GPUs!")
     # if os.path.exists('checkpoints/%s/models/model_%s.t7'% (args.exp_name, args.model)):
@@ -210,7 +211,7 @@ def test(args, io):
 if __name__ == "__main__":
     # Training settings
     parser = argparse.ArgumentParser(description='Point Cloud Recognition')
-    parser.add_argument('--exp_name', type=str, default='share-1024-2048-32', metavar='N',
+    parser.add_argument('--exp_name', type=str, default='DG-1024-2048-32', metavar='N',
                         help='Name of the experiment')
     parser.add_argument('--model', type=str, default='paigcnn', metavar='N',
                         choices=['pointnet', 'paigcnn', 'dgcnn'],
@@ -239,7 +240,7 @@ if __name__ == "__main__":
                         help='num of points to use')
     parser.add_argument('--dropout', type=float, default=0.5,
                         help='dropout rate')
-    parser.add_argument('--emb_dims', type=int, default=1024, metavar='N',
+    parser.add_argument('--emb_dims', type=int, default=2048, metavar='N',
                         help='Dimension of embeddings')
     parser.add_argument('--k', type=int, default=32, metavar='N',
                         help='Num of nearest neighbors to use')

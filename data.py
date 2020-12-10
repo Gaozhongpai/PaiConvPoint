@@ -77,7 +77,7 @@ class ModelNet40(Dataset):
             # pointcloud = self.data[item][np.random.permutation(self.data.shape[1])[:self.num_points]]
             pointcloud = translate_pointcloud(pointcloud)
             pointcloud = jitter_pointcloud(pointcloud)
-            # np.random.shuffle(pointcloud)
+            np.random.shuffle(pointcloud)
         else:
             pointcloud = self.data[item][:self.num_points]
             # pointcloud = self.data[item][np.random.permutation(self.data.shape[1])[:self.num_points]]
