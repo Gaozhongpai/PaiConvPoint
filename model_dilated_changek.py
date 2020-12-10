@@ -14,37 +14,12 @@ from util import fibonacci_sphere, knn, knn3, topkmax
 from networks import get_graph_feature
 import math
 
-class RandLANet(nn.Module):
-    def __init__(self, in_c, out_c, k, kernel_size=20, bias=True): # ,device=None):
-        super(RandLANet, self).__init__()
-        self.k = k
-        self.kernel_size = kernel_size
-        self.in_c = in_c
-        self.out_c = out_c
-        self.mlp = nn.Conv1d(in_c, in_c, kernel_size=1, bias=False)
-        self.conv = nn.Linear(in_c,out_c,bias=bias)
-        self.bn = nn.BatchNorm1d(out_c)
-        self.softmax = nn.Softmax(dim=1)
-
-    def forward(self, feature, neigh_index, permatrix):
-        bsize, feats, num_pts = feature.size()
-        feature = feature.permute(0, 2, 1).contiguous().view(bsize*num_pts, feats)
-        
-        spirals = feature[neigh_index,:].view(bsize*num_pts, self.k, feats)
-        spirals = spirals.permute(0, 2, 1).contiguous()
-        
-        spirals = torch.sum(self.softmax(self.mlp(spirals))*spirals, dim=-1) ## This is for RandLA-Net
-        spirals = spirals.view(bsize*num_pts, feats)
-
-        out_feat = self.conv(spirals).view(bsize,num_pts,self.out_c)  
-        out_feat = self.bn(out_feat.permute(0, 2, 1).contiguous())      
-        return out_feat
-    
 class PaiConv(nn.Module):
     def __init__(self, in_c, out_c, k, num_neighbor, dilation=1, bias=True): # ,device=None):
         super(PaiConv, self).__init__()
         self.k = k
-        self.num_neighbor = math.ceil(k / dilation)
+        self.k2 = math.ceil(k / dilation)
+        self.num_neighbor = num_neighbor #math.ceil(k / dilation)
         self.in_c = in_c
         self.out_c = out_c
         self.dilation = dilation
@@ -52,7 +27,7 @@ class PaiConv(nn.Module):
         self.group = 4
         self.B = nn.Parameter(torch.randn(7, self.map_size) , requires_grad=False)  
         self.kernels = nn.Parameter(torch.tensor(fibonacci_sphere(self.num_neighbor)).transpose(0, 1), requires_grad=False)
-        self.one_padding = nn.Parameter(torch.zeros(self.num_neighbor, self.num_neighbor), requires_grad=False)
+        self.one_padding = nn.Parameter(torch.zeros(self.k2, self.num_neighbor), requires_grad=False)
         self.one_padding.data[0, 0] = 1
  
         self.in_c_x = in_c // 2 if in_c > 3 else in_c
@@ -72,7 +47,7 @@ class PaiConv(nn.Module):
         neigh_index = (neigh_index + idx_base).view(-1) # bsize*num_pts*spiral_size
 
         #### relative position ####
-        x_neighs = x[neigh_index,:].view(bsize*num_pts, self.num_neighbor, 3)
+        x_neighs = x[neigh_index,:].view(bsize*num_pts, -1, 3)
         x_repeat = x_neighs[:, 0:1, :].expand_as(x_neighs)
         x_relative = x_neighs - x_repeat
         x_dis = torch.norm(x_relative, dim=-1, keepdim=True)
@@ -81,7 +56,7 @@ class PaiConv(nn.Module):
         x_feats = self.mlp(x_feats.permute(0, 2, 1).contiguous())
 
         feats = feature.permute(0, 2, 1).contiguous().view(bsize*num_pts, num_feat)
-        feats = feats[neigh_index,:].view(bsize*num_pts, self.num_neighbor, num_feat)
+        feats = feats[neigh_index,:].view(bsize*num_pts, -1, num_feat)
         feats = feats.permute(0, 2, 1).contiguous()
         feats = torch.cat([feats, x_feats], dim=1)
         num_feat = num_feat + self.in_c_x
@@ -105,7 +80,7 @@ class PaiNet(nn.Module):
         super(PaiNet, self).__init__()
         self.args = args
         self.k = args.k
-        num_kernel = 7
+        num_kernel = 9
         self.knn = knn3(self.k)
 
         self.activation = nn.LeakyReLU(negative_slope=0.2)
@@ -136,8 +111,9 @@ class PaiNet(nn.Module):
         # x = torch.bmm(x, t)                     # (bsize, num_points, 3) * (bsize, 3, 3) -> (bsize, num_points, 3)
         # x = x.transpose(2, 1) 
         
-        x_temp = x.permute(0, 2, 1).contiguous()
-        neigh_indexs = self.knn(x_temp, x_temp)
+        neigh_indexs = knn(x, self.k)
+        # x_temp = x.permute(0, 2, 1).contiguous()
+        # neigh_indexs = self.knn(x_temp, x_temp)
         
         feature = F.gelu(self.conv1(x, x, neigh_indexs))
         x1 = feature.clone()

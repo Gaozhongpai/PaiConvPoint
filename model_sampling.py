@@ -14,32 +14,6 @@ from util import fibonacci_sphere, knn, knn3, topkmax
 from networks import get_graph_feature
 import math
 
-class RandLANet(nn.Module):
-    def __init__(self, in_c, out_c, k, kernel_size=20, bias=True): # ,device=None):
-        super(RandLANet, self).__init__()
-        self.k = k
-        self.kernel_size = kernel_size
-        self.in_c = in_c
-        self.out_c = out_c
-        self.mlp = nn.Conv1d(in_c, in_c, kernel_size=1, bias=False)
-        self.conv = nn.Linear(in_c,out_c,bias=bias)
-        self.bn = nn.BatchNorm1d(out_c)
-        self.softmax = nn.Softmax(dim=1)
-
-    def forward(self, feature, neigh_index, permatrix):
-        bsize, feats, num_pts = feature.size()
-        feature = feature.permute(0, 2, 1).contiguous().view(bsize*num_pts, feats)
-        
-        spirals = feature[neigh_index,:].view(bsize*num_pts, self.k, feats)
-        spirals = spirals.permute(0, 2, 1).contiguous()
-        
-        spirals = torch.sum(self.softmax(self.mlp(spirals))*spirals, dim=-1) ## This is for RandLA-Net
-        spirals = spirals.view(bsize*num_pts, feats)
-
-        out_feat = self.conv(spirals).view(bsize,num_pts,self.out_c)  
-        out_feat = self.bn(out_feat.permute(0, 2, 1).contiguous())      
-        return out_feat
-    
 class PaiConv(nn.Module):
     def __init__(self, in_c, out_c, kernels, k, num_neighbor, bias=True): # ,device=None):
         super(PaiConv, self).__init__()
