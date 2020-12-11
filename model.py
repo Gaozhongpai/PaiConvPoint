@@ -104,7 +104,7 @@ class PaiConvDG(nn.Module):
         num_feat = num_feat*2
         if num_feat > 2*3: ## channel shuffle
             feats = feats.view(bsize*num_pts,self.group, num_feat//self.group,-1).permute(0,2,1,3).reshape(bsize*num_pts, num_feat,-1)
-        feats = torch.matmul(feats, permatrix)
+        feats = torch.matmul(feats, permatrix / (torch.sum(permatrix, dim=1, keepdim=True) + 1e-6))
         feats = feats.view(bsize*num_pts, num_feat, self.kernel_size)
 
         out_feat = torch.max(self.conv(feats), dim=-1)[0].view(bsize,num_pts,self.out_c)  
