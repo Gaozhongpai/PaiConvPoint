@@ -31,8 +31,7 @@ class PaiConv(nn.Module):
 
         self.in_c_x = in_c // 2 if in_c > 3 else in_c
         self.mlp = nn.Conv1d(self.map_size*2, self.in_c_x, kernel_size=1, bias=bias)
-        self.conv1 = nn.Linear((in_c+self.in_c_x)*self.num_neighbor, out_c,bias=bias)
-        # self.conv = nn.Conv1d((in_c*2+self.in_c_x),out_c,kernel_size=1,bias=bias)
+        self.conv = nn.Linear((in_c+self.in_c_x)*self.num_neighbor,out_c,bias=bias)
         self.bn = nn.BatchNorm1d(out_c)
 
     def forward(self, x, feature):
@@ -66,12 +65,12 @@ class PaiConv(nn.Module):
         permatrix = (permatrix + self.one_padding) #
         permatrix = topkmax(permatrix)
 
-        if num_feat > 2*3 + self.in_c_x: ## channel shuffle
+        if num_feat > 3 + self.in_c_x: ## channel shuffle
             feats = feats.view(bsize*num_pts,self.group, num_feat//self.group,-1).permute(0,2,1,3).reshape(bsize*num_pts, num_feat,-1)
         feats = torch.matmul(feats, permatrix) 
 
         feats = feats.view(bsize*num_pts, num_feat*self.num_neighbor)
-        out_feat = self.conv1(feats).view(bsize,num_pts,self.out_c)  
+        out_feat = self.conv(feats).view(bsize,num_pts,self.out_c)  
         # feats = feats.view(bsize*num_pts, num_feat, self.num_neighbor)
         # out_feat = torch.max(self.conv(feats), dim=-1)[0].view(bsize,num_pts,self.out_c)  
         # out_feat = torch.cat([out_feat1, out_feat2], dim=-1)
@@ -140,18 +139,18 @@ class PaiNet(nn.Module):
         
         feature = F.gelu(self.conv1(x, x))
         x, feature = self.pooling(x, feature, num_pts // 4)
-        x1 = feature[:, :, :num_pts // 32]
+        x1 = feature[:, :, :num_pts // 64]
 
         feature = F.gelu(self.conv2(x, feature))
-        x, feature = self.pooling(x, feature, num_pts // 8)
-        x2 = feature[:, :, :num_pts // 32]
+        x, feature = self.pooling(x, feature, num_pts // 16)
+        x2 = feature[:, :, :num_pts // 64]
         
         feature = F.gelu(self.conv3(x, feature))
-        x, feature = self.pooling(x, feature, num_pts // 16)
-        x3 = feature[:, :, :num_pts // 32]
+        x, feature = self.pooling(x, feature, num_pts // 32)
+        x3 = feature[:, :, :num_pts // 64]
 
         feature = F.gelu(self.conv4(x, feature))
-        _, x4 = self.pooling(x, feature, num_pts // 32)
+        _, x4 = self.pooling(x, feature, num_pts // 64)
 
         x = torch.cat((x1, x2, x3, x4), dim=1)
         x = F.gelu(self.conv5(x))

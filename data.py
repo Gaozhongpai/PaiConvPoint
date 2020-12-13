@@ -121,8 +121,8 @@ def point_loader_test(input):
 
     mesh = torch.load(input)
     data = mesh['data']
-    # pointcloud = data[:8196]
-    pointcloud = data[torch.randperm(data.shape[0])[:8192]]
+    pointcloud = data[:8196]
+    # pointcloud = data[torch.randperm(data.shape[0])[:8192]]
     return pointcloud
 
 if __name__ == '__main__':

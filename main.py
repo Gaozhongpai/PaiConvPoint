@@ -18,12 +18,13 @@ import torch.optim as optim
 from torch.optim.lr_scheduler import CosineAnnealingLR
 from data import ModelNet40
 # from pai_model import PaiNet
-from model import PaiNet
+from model_sampling import PaiNet
 import numpy as np
 from torch.utils.data import DataLoader
 from util import cal_loss, IOStream
 import sklearn.metrics as metrics
 from tqdm import tqdm
+from networks import DGCNN
 
 
 def _init_():
@@ -211,7 +212,7 @@ def test(args, io):
 if __name__ == "__main__":
     # Training settings
     parser = argparse.ArgumentParser(description='Point Cloud Recognition')
-    parser.add_argument('--exp_name', type=str, default='DG-bsize32-1024-2048-32', metavar='N',
+    parser.add_argument('--exp_name', type=str, default='sampling-1024-2048-32', metavar='N',
                         help='Name of the experiment')
     parser.add_argument('--model', type=str, default='paigcnn', metavar='N',
                         choices=['pointnet', 'paigcnn', 'dgcnn'],

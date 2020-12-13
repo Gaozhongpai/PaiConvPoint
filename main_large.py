@@ -21,7 +21,7 @@ import torch.utils.data as Data
 import torchvision.datasets as datasets
 
 # from pai_model import PaiNet
-from model_sampling import PointNet, DGCNN, PaiNet
+from model_sampling import PaiNet
 import numpy as np
 from torch.utils.data import DataLoader
 from util import cal_loss, IOStream
@@ -48,11 +48,10 @@ def train(args, io):
     #                          batch_size=args.test_batch_size, shuffle=True, drop_last=False)
 
     point_loader = {"train": point_loader_train, "test": point_loader_test}
-    choose = {"train": True, "test": False}
     image_datasets = {x: datasets.DatasetFolder(os.path.join(args.dataset, x), point_loader[x], "spl")
                         for x in ['train', 'test']}
-    train_loader = Data.DataLoader(image_datasets['train'], batch_size=args.batch_size, shuffle=True, drop_last=choose['train'], num_workers=8)
-    test_loader = Data.DataLoader(image_datasets['test'], batch_size=args.batch_size, shuffle=True, drop_last=choose['test'], num_workers=8)
+    train_loader = Data.DataLoader(image_datasets['train'], batch_size=args.batch_size, shuffle=True, drop_last=True, num_workers=8)
+    test_loader = Data.DataLoader(image_datasets['test'], batch_size=args.test_batch_size, shuffle=False, drop_last=False, num_workers=8)
 
     device = torch.device("cuda" if args.cuda else "cpu")
 
@@ -65,6 +64,8 @@ def train(args, io):
         model = PaiNet(args).to(device)
         #raise Exception("Not implemented")
     print(str(model))
+    params = sum(p.numel() for p in model.parameters() if p.requires_grad)
+    print("Total number of parameters is: {}".format(params))
 
     model = nn.DataParallel(model)
     print("Let's use", torch.cuda.device_count(), "GPUs!")
@@ -132,40 +133,40 @@ def train(args, io):
                                                                                 scheduler.get_lr()[0])
         io.cprint(outstr)
 
+
         ####################
         # Test
         ####################
-        for _ in range(10):
-            test_loss = 0.0
-            count = 0.0
-            model.eval()
-            test_pred = []
-            test_true = []
-            for data, label in test_loader:
-        
-                data, label = data.to(device), label.to(device).squeeze()
-                data = data.permute(0, 2, 1)
-                batch_size = data.size()[0]
-                logits = model(data)
-                loss = criterion(logits, label)
-                preds = logits.max(dim=1)[1]
-                count += batch_size
-                test_loss += loss.item() * batch_size
-                test_true.append(label.cpu().numpy())
-                test_pred.append(preds.detach().cpu().numpy())
-            test_true = np.concatenate(test_true)
-            test_pred = np.concatenate(test_pred)
-            test_acc = metrics.accuracy_score(test_true, test_pred)
-            avg_per_class_acc = metrics.balanced_accuracy_score(test_true, test_pred)
-            if test_acc >= best_test_acc:
-                best_test_acc = test_acc
-                torch.save(model.state_dict(), 'checkpoints/%s/models/model_%s.t7' % (args.exp_name, args.model))
-            outstr = 'Test %d, loss: %.6f, test acc: %.6f, test avg acc: %.6f, test best: %.6f' % (epoch,
-                                                                                test_loss*1.0/count,
-                                                                                test_acc,
-                                                                                avg_per_class_acc, 
-                                                                                best_test_acc)
-            io.cprint(outstr)
+        test_loss = 0.0
+        count = 0.0
+        model.eval()
+        test_pred = []
+        test_true = []
+        for data, label in test_loader:
+    
+            data, label = data.to(device), label.to(device).squeeze()
+            data = data.permute(0, 2, 1)
+            batch_size = data.size()[0]
+            logits = model(data)
+            loss = criterion(logits, label)
+            preds = logits.max(dim=1)[1]
+            count += batch_size
+            test_loss += loss.item() * batch_size
+            test_true.append(label.cpu().numpy())
+            test_pred.append(preds.detach().cpu().numpy())
+        test_true = np.concatenate(test_true)
+        test_pred = np.concatenate(test_pred)
+        test_acc = metrics.accuracy_score(test_true, test_pred)
+        avg_per_class_acc = metrics.balanced_accuracy_score(test_true, test_pred)
+        if test_acc >= best_test_acc:
+            best_test_acc = test_acc
+            torch.save(model.state_dict(), 'checkpoints/%s/models/model_%s.t7' % (args.exp_name, args.model))
+        outstr = 'Test %d, loss: %.6f, test acc: %.6f, test avg acc: %.6f, test best: %.6f' % (epoch,
+                                                                            test_loss*1.0/count,
+                                                                            test_acc,
+                                                                            avg_per_class_acc, 
+                                                                            best_test_acc)
+        io.cprint(outstr)
 
 
 def test(args, io):
@@ -230,7 +231,7 @@ if __name__ == "__main__":
     parser.add_argument('--dataset', type=str, default='/media/pai/data/modelnet40_normal_resampled/Processed/sliced', metavar='N')
     parser.add_argument('--batch_size', type=int, default=24, metavar='batch_size',
                         help='Size of batch)')
-    parser.add_argument('--test_batch_size', type=int, default=16, metavar='batch_size',
+    parser.add_argument('--test_batch_size', type=int, default=8, metavar='batch_size',
                         help='Size of batch)')
     parser.add_argument('--epochs', type=int, default=250, metavar='N',
                         help='number of episode to train ')
@@ -250,9 +251,9 @@ if __name__ == "__main__":
                         help='num of points to use')
     parser.add_argument('--dropout', type=float, default=0.5,
                         help='dropout rate')
-    parser.add_argument('--emb_dims', type=int, default=1024, metavar='N',
+    parser.add_argument('--emb_dims', type=int, default=2048, metavar='N',
                         help='Dimension of embeddings')
-    parser.add_argument('--k', type=int, default=32, metavar='N',
+    parser.add_argument('--k', type=int, default=40, metavar='N',
                         help='Num of nearest neighbors to use')
     parser.add_argument('--temp_factor', type=int, default=100, metavar='N',
                         help='Factor to control the softmax precision')
