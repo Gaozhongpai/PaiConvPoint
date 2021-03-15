@@ -14,7 +14,8 @@ import torch.nn.functional as F
 # from sparsemax import Sparsemax
 # from sinkhorn import Sinkhorn
 from util import fibonacci_sphere, knn, topkmax
-    
+from pointnet2_ops import pointnet2_utils
+
 class PaiConv(nn.Module):
     def __init__(self, in_c, out_c, k, kernel_size=20, bias=True): # ,device=None):
         super(PaiConv, self).__init__()
@@ -91,7 +92,7 @@ class PaiConvDG(nn.Module):
         self.in_c = in_c
         self.out_c = out_c
         self.group = 4
-        self.conv = nn.Conv2d(2*in_c,out_c,kernel_size=1,bias=False)
+        self.conv = nn.Conv1d(2*in_c,out_c,kernel_size=1)
         self.bn = nn.BatchNorm1d(out_c)
 
     def forward(self, feature, neigh_indexs, permatrix):
@@ -109,10 +110,10 @@ class PaiConvDG(nn.Module):
         if num_feat > 2*3: ## channel shuffle
             feats = feats.view(bsize*num_pts,self.group, num_feat//self.group,-1).permute(0,2,1,3).reshape(bsize*num_pts, num_feat,-1)
         feats = torch.matmul(feats, permatrix / (torch.sum(permatrix, dim=1, keepdim=True) + 1e-6))
-        feats = feats.view(bsize, num_pts, num_feat, self.kernel_size).permute(0, 2, 1, 3)
+        feats = feats.view(bsize*num_pts, num_feat, self.kernel_size)
 
         out_feat = torch.max(self.conv(feats), dim=-1)[0]
-        out_feat = self.bn(out_feat)      
+        out_feat = self.bn(out_feat.view(bsize, num_pts,-1).permute(0, 2, 1).contiguous())      
         return out_feat
     
 class PaiNet(nn.Module):
@@ -169,6 +170,14 @@ class PaiNet(nn.Module):
         # x = torch.bmm(x, t)                     # (bsize, num_points, 3) * (bsize, 3, 3) -> (bsize, num_points, 3)
         # x = x.transpose(2, 1) 
 
+        # xyz_flipped = x.transpose(1, 2).contiguous()
+        # x = (
+        #     pointnet2_utils.gather_operation(
+        #         x.contiguous(), 
+        #         pointnet2_utils.furthest_point_sample(xyz_flipped, self.args.num_points)
+        #     )
+        # )
+
         neigh_indexs, permatrix = self.permatrix_best(x)
                 
         feature = F.gelu(self.conv1(x, neigh_indexs, permatrix))
@@ -191,8 +200,8 @@ class PaiNet(nn.Module):
 
         x = F.gelu(self.bn6(self.linear1(x)))
         x = self.dp1(x)
-        x = F.gelu(self.bn7(self.linear2(x)))
-        x = self.dp2(x)
+        feat = F.gelu(self.bn7(self.linear2(x)))
+        x = self.dp2(feat)
         x = self.linear3(x)
         return x
 

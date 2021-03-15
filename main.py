@@ -18,7 +18,7 @@ import torch.optim as optim
 from torch.optim.lr_scheduler import CosineAnnealingLR
 from data import ModelNet40
 # from pai_model import PaiNet
-from model_sampling import PaiNet
+from model_dilated import PaiNet
 import numpy as np
 from torch.utils.data import DataLoader
 from util import cal_loss, IOStream
@@ -43,7 +43,7 @@ def train(args, io):
     train_loader = DataLoader(ModelNet40(partition='train', num_points=args.num_points), num_workers=8,
                               batch_size=args.batch_size, shuffle=True, drop_last=True)
     test_loader = DataLoader(ModelNet40(partition='test', num_points=args.num_points), num_workers=8,
-                             batch_size=args.test_batch_size, shuffle=True, drop_last=False)
+                             batch_size=args.test_batch_size, shuffle=False, drop_last=False)
 
     device = torch.device("cuda" if args.cuda else "cpu")
 
@@ -62,7 +62,12 @@ def train(args, io):
     print("Let's use", torch.cuda.device_count(), "GPUs!")
     # if os.path.exists('checkpoints/%s/models/model_%s.t7'% (args.exp_name, args.model)):
     #     checkpoint_dict = torch.load('./checkpoints/%s/models/model_%s.t7'% (args.exp_name, args.model), map_location=device)
-    #     model.load_state_dict(checkpoint_dict, strict=True)
+    #     model_dict = model.state_dict()
+    #     pretrained_dict = checkpoint_dict
+    #     pretrained_dict = {k: v for k, v in pretrained_dict.items() if k in model_dict and "one_padding" not in k}
+    #     model_dict.update(pretrained_dict) 
+    #     model.load_state_dict(pretrained_dict, strict=False)
+    #     #model.load_state_dict(checkpoint_dict, strict=True)
     #     print("Load model from './checkpoints/%s/models/model_%s.t7 !'"% (args.exp_name, args.model))
 
     if args.use_sgd:
@@ -132,18 +137,19 @@ def train(args, io):
         model.eval()
         test_pred = []
         test_true = []
-        for data, label in test_loader:
-    
-            data, label = data.to(device), label.to(device).squeeze()
-            data = data.permute(0, 2, 1)
-            batch_size = data.size()[0]
-            logits = model(data)
-            loss = criterion(logits, label)
-            preds = logits.max(dim=1)[1]
-            count += batch_size
-            test_loss += loss.item() * batch_size
-            test_true.append(label.cpu().numpy())
-            test_pred.append(preds.detach().cpu().numpy())
+        with torch.no_grad():
+            for data, label in test_loader:
+        
+                data, label = data.to(device), label.to(device).squeeze()
+                data = data.permute(0, 2, 1)
+                batch_size = data.size()[0]
+                logits = model(data)
+                loss = criterion(logits, label)
+                preds = logits.max(dim=1)[1]
+                count += batch_size
+                test_loss += loss.item() * batch_size
+                test_true.append(label.cpu().numpy())
+                test_pred.append(preds.detach().cpu().numpy())
         test_true = np.concatenate(test_true)
         test_pred = np.concatenate(test_pred)
         test_acc = metrics.accuracy_score(test_true, test_pred)
@@ -212,7 +218,7 @@ def test(args, io):
 if __name__ == "__main__":
     # Training settings
     parser = argparse.ArgumentParser(description='Point Cloud Recognition')
-    parser.add_argument('--exp_name', type=str, default='sampling-1024-2048-32', metavar='N',
+    parser.add_argument('--exp_name', type=str, default='dialted-1024-2048-16', metavar='N',
                         help='Name of the experiment')
     parser.add_argument('--model', type=str, default='paigcnn', metavar='N',
                         choices=['pointnet', 'paigcnn', 'dgcnn'],
@@ -221,7 +227,7 @@ if __name__ == "__main__":
                         choices=['modelnet40'])
     parser.add_argument('--batch_size', type=int, default=24, metavar='batch_size',
                         help='Size of batch)')
-    parser.add_argument('--test_batch_size', type=int, default=16, metavar='batch_size',
+    parser.add_argument('--test_batch_size', type=int, default=24, metavar='batch_size',
                         help='Size of batch)')
     parser.add_argument('--epochs', type=int, default=250, metavar='N',
                         help='number of episode to train ')
@@ -243,7 +249,7 @@ if __name__ == "__main__":
                         help='dropout rate')
     parser.add_argument('--emb_dims', type=int, default=2048, metavar='N',
                         help='Dimension of embeddings')
-    parser.add_argument('--k', type=int, default=32, metavar='N',
+    parser.add_argument('--k', type=int, default=12, metavar='N',
                         help='Num of nearest neighbors to use')
     parser.add_argument('--temp_factor', type=int, default=100, metavar='N',
                         help='Factor to control the softmax precision')

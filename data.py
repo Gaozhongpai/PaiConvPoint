@@ -14,7 +14,7 @@ import glob
 import h5py
 import numpy as np
 from torch.utils.data import Dataset
-# import open3d as o3d
+import open3d as o3d
 import time
 import torch
 
@@ -109,11 +109,9 @@ def point_loader_train(input):
     #noise = torch.empty_like(data).normal_(0, 0.001)
     #data = data + noise
 
-    pointcloud = data[torch.randperm(data.shape[0])[:8192]]
+    pointcloud = data[torch.randperm(data.shape[0])[:2048]]
     pointcloud = translate_pointcloud_tensor(pointcloud)
     pointcloud = jitter_pointcloud_tensor(pointcloud)
-    # np.random.shuffle(pointcloud)
-
     return pointcloud
 
 def point_loader_test(input):
@@ -121,26 +119,41 @@ def point_loader_test(input):
 
     mesh = torch.load(input)
     data = mesh['data']
-    pointcloud = data[:8196]
+    pointcloud = data[:2048]
     # pointcloud = data[torch.randperm(data.shape[0])[:8192]]
     return pointcloud
 
 if __name__ == '__main__':
-    train = ModelNet40(512)
-    test = ModelNet40(512, 'test')
+    from pointnet2_ops import pointnet2_utils
+
+    # train = ModelNet40(1024)
+    test = ModelNet40(1024, 'test')
+    index = [0, 3,5]
+    data = test.data[index]
     vis = o3d.visualization.Visualizer()
     vis.create_window(visible=True)
     pcd = o3d.geometry.PointCloud()
-    for i, (data, label) in enumerate(train):
-        if i < 20:            
+    for i, (data, label) in enumerate(test):
+        if i < 5:            
             pcd.points = o3d.utility.Vector3dVector(data)
             vis.add_geometry(pcd)
 
             ctr = vis.get_view_control()
-            ctr.set_front([1,1,-1])
-            ctr.set_up([0,1,0])
-            ctr.set_zoom(0.9)
+            ctr.rotate(10.0, 0.0)
 
+            vis.update_geometry()
+            vis.poll_events()
+            vis.update_renderer()
+            time.sleep(1)
+            vis.capture_screen_image('{}b.png'.format(i))
+            vis.remove_geometry(pcd)
+
+            point = torch.from_numpy(pcd.points)
+            x_sub = (
+            pointnet2_utils.gather_operation(
+                xyz_flipped, pointnet2_utils.furthest_point_sample(x, num_pool)
+                ).transpose(1, 2).contiguous()
+            )
             vis.update_geometry(pcd)
             vis.poll_events()
             vis.update_renderer()

@@ -1,4 +1,3 @@
 {
-    "git.ignoreLimitWarning": true,
-    "python.pythonPath": "/home/pai/miniconda3/bin/python"
+    "git.ignoreLimitWarning": true
 }

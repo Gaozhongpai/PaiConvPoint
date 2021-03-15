@@ -15,6 +15,16 @@ import random, math
 from pykeops.torch import generic_argkmin
 
 
+def compute_rotation_matrix_from_ortho6d(poses):
+    x_raw = poses[:, 0:3]  #batch*3
+    y_raw = poses[:, 3:6]  #batch*3
+
+    x = F.normalize(x_raw, p=2, dim=1)  #batch*3
+    z = F.normalize(torch.cross(x, y_raw), p=2, dim=1)  #batch*3
+    y = torch.cross(z, x)  #batch*3
+    matrix = torch.stack((x, y, z), dim=2)  #batch*3*3
+    return matrix
+    
 def topkmax(permatrix):
     permatrix = torch.where(permatrix > 0, permatrix, torch.full_like(permatrix, 0.))  # permatrix[permatrix < 0] = torch.min(permatrix)*5
     permatrix = permatrix / (torch.sum(permatrix, dim=1, keepdim=True) + 1e-6)
